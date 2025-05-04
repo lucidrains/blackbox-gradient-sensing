@@ -1,0 +1,8 @@
+box2d-py
+einops>=0.8.0
+fire
+gymnasium[box2d]>=1.0.0
+moviepy>=1.0.3
+numpy>=2.2.5
+torch>=2.4
+tqdm
