@@ -12,7 +12,7 @@ from torch.nn import Module, ModuleList
 from torch.func import functional_call
 torch.set_float32_matmul_precision('high')
 
-from einops import reduce, rearrange, einsum, pack, unpack
+from einops import reduce, rearrange, reduce, einsum, pack, unpack
 
 from tqdm import tqdm
 
@@ -51,6 +51,50 @@ def gumbel_sample(t, temp = 1.):
     return t.argmax(dim = -1)
 
 # networks
+
+class StateNorm(Module):
+    def __init__(
+        self,
+        dim,
+        eps = 1e-5
+    ):
+        # equation (3) in https://arxiv.org/abs/2410.09754
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+
+        self.register_buffer('step', tensor(1))
+        self.register_buffer('running_mean', torch.zeros(dim))
+        self.register_buffer('running_variance', torch.ones(dim))
+
+    def forward(
+        self,
+        state
+    ):
+        assert state.shape[-1] == self.dim, f'expected feature dimension of {self.dim} but received {x.shape[-1]}'
+
+        time = self.step.item()
+        mean = self.running_mean
+        variance = self.running_variance
+
+        normed = (state - mean) / variance.sqrt().clamp(min = self.eps)
+
+        if not self.training:
+            return normed
+
+        # update running mean and variance
+
+        new_obs_mean = reduce(state, '... d -> d', 'mean')
+        delta = new_obs_mean - mean
+
+        new_mean = mean + delta / time
+        new_variance = (time - 1) / time * (variance + (delta ** 2) / time)
+
+        self.step.add_(1)
+        self.running_mean.copy_(new_mean)
+        self.running_variance.copy_(new_variance)
+
+        return normed
 
 class LinearAttention(Module):
     """ small linear attention module for memory """
@@ -195,7 +239,10 @@ def main(
         num_actions = num_actions
     )
 
+    state_norm = StateNorm(state_dim)
+
     actor = actor.to(device)
+    state_norm = state_norm.to(device)
 
     params = dict(actor.named_parameters())
 
@@ -211,6 +258,7 @@ def main(
 
         # create noises upfront
 
+        episode_states = []
         noises = dict()
 
         for key, param in params.items():
@@ -234,6 +282,8 @@ def main(
 
                     state, _ = env.reset(seed = episode_seed)
 
+                    episode_states.clear()
+
                     total_reward = 0.
 
                     mem = actor.init_mem
@@ -241,7 +291,13 @@ def main(
                     for timestep in range(max_timesteps):
 
                         state = torch.from_numpy(state).to(device)
-                        action_logits, mem = functional_call(actor, param_with_noise, (state, mem))
+
+                        episode_states.append(state)
+
+                        state_norm.eval()
+                        normed_state = state_norm(state)
+
+                        action_logits, mem = functional_call(actor, param_with_noise, (normed_state, mem))
 
                         action = gumbel_sample(action_logits)
                         action = action.item()
@@ -258,6 +314,13 @@ def main(
                         state = next_state
                 
                     reward_stats[noise_index, sign_index, repeat_index] = total_reward
+
+        # update state norm with one episode worth (as it is repeated)
+
+        state_norm.train()
+
+        for state in episode_states:
+            state_norm(state)
 
         # update based on eq (3) and (4) in the paper
         # their contribution is basically to use reward deltas (for a given noise and its negative sign) for sorting for the 'elite' directions

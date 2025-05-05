@@ -33,3 +33,14 @@ $ python train.py
     url     = {https://api.semanticscholar.org/CorpusID:250526228}
 }
 ```
+
+```bibtex
+@article{Lee2024SimBaSB,
+    title   = {SimBa: Simplicity Bias for Scaling Up Parameters in Deep Reinforcement Learning},
+    author  = {Hojoon Lee and Dongyoon Hwang and Donghu Kim and Hyunseung Kim and Jun Jet Tai and Kaushik Subramanian and Peter R. Wurman and Jaegul Choo and Peter Stone and Takuma Seno},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2410.09754},
+    url     = {https://api.semanticscholar.org/CorpusID:273346233}
+}
+```
