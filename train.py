@@ -112,6 +112,7 @@ class Actor(Module):
 
         self.action_head = nn.Linear(hidden_dim, num_actions)
 
+    @torch.compile
     def forward(self, x):
         hidden = self.net(x)
         return self.action_head(hidden).softmax(dim = -1)
@@ -121,14 +122,14 @@ class Actor(Module):
 def main(
     env_name = 'LunarLander-v3',
     total_learning_updates = 1000,
-    noise_pop_size = 20,
-    topk_elites = 5,
+    noise_pop_size = 40,
+    topk_elites = 7,
     num_rollouts_before_update = 2,
     learning_rate = 1e-3,
     weight_decay_strength = 0.1,
     max_timesteps = 250,
     actor_hidden_dim = 32,
-    noise_scale = 1.,
+    noise_scale = 0.5,
     seed = None,
     render = True,
     clear_videos = True,
