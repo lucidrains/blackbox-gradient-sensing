@@ -153,7 +153,7 @@ def main(
     topk_elites = 8,
     num_rollout_repeats = 2,
     learning_rate = 1e-3,
-    weight_decay_strength = 1e-2,
+    weight_decay = 0.999,
     max_timesteps = 250,
     actor_hidden_dim = 32,
     seed = None,
@@ -240,9 +240,8 @@ def main(
 
                     for timestep in range(max_timesteps):
 
-                        with torch.inference_mode():
-                            state = torch.from_numpy(state).to(device)
-                            action_logits, mem = functional_call(actor, param_with_noise, (state, mem))
+                        state = torch.from_numpy(state).to(device)
+                        action_logits, mem = functional_call(actor, param_with_noise, (state, mem))
 
                         action = gumbel_sample(action_logits)
                         action = action.item()
@@ -297,11 +296,9 @@ def main(
 
             # weight decay
 
-            param.norm(p = 1).backward()
-            param.data.sub_(param.grad * learning_rate * weight_decay_strength)
-            param.grad = None
+            param.data.mul_(weight_decay)
 
         learning_updates_pbar.set_description(f'best: {reward_mean.amax().item():.2f} | best delta: {ranked_reward_deltas.amax().item():.2f}')
 
 if __name__ == '__main__':
-    fire.Fire(main)
+    fire.Fire(torch.inference_mode(main))
