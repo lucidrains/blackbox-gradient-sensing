@@ -288,15 +288,13 @@ def main(
 
         for param, noise in zip(params.values(), noises.values()):
 
+            # add the best "elite" noise directions weighted by eq (3)
+
             best_noises = noise[ranked_reward_indices]
 
             update = einsum(best_noises, weights, 'n ..., n -> ...')
 
-            param.data.add_(update)
-
-            # weight decay
-
-            param.data.mul_(weight_decay)
+            param.data.mul_(weight_decay).add_(update)
 
         learning_updates_pbar.set_description(f'best: {reward_mean.amax().item():.2f} | best delta: {ranked_reward_deltas.amax().item():.2f}')
 
