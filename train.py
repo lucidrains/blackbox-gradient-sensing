@@ -190,16 +190,17 @@ class Actor(Module):
 
 # main
 
+@torch.inference_mode()
 def main(
     env_name = 'LunarLander-v3',
     total_learning_updates = 1000,
     noise_pop_size = 40,
-    noise_std_dev = 0.025, # Appendix F in paper, appears to be constant for sim and real
+    noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
     topk_elites = 8,
     num_rollout_repeats = 2,
     learning_rate = 1e-3,
     weight_decay = 0.9999,
-    max_timesteps = 250,
+    max_timesteps = 400,
     actor_hidden_dim = 32,
     seed = None,
     render = True,
@@ -263,13 +264,13 @@ def main(
         noises = dict()
 
         for key, param in params.items():
-            noises_for_param = torch.randn((noise_pop_size, *param.shape), device = device) * noise_std_dev
+            noises_for_param = torch.randn((noise_pop_size, *param.shape), device = device)
 
             noises_for_param, ps = pack([noises_for_param], 'n *')
-            nn.init.orthogonal_(noises_for_param)
+            nn.init.orthogonal_(noises_for_param)            
             noises_for_param, = unpack(noises_for_param, ps, 'n *')
 
-            noises[key] = noises_for_param
+            noises[key] = noises_for_param * noise_std_dev
 
         for noise_index in tqdm(range(noise_pop_size), desc = 'noise index', position = 1, leave = False):
 
@@ -363,4 +364,4 @@ def main(
         learning_updates_pbar.set_description(f'best: {reward_mean.amax().item():.2f} | best delta: {ranked_reward_deltas.amax().item():.2f}')
 
 if __name__ == '__main__':
-    fire.Fire(torch.inference_mode(main))
+    fire.Fire(main)
