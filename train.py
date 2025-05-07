@@ -3,6 +3,7 @@ from __future__ import annotations
 import fire
 from shutil import rmtree
 from math import ceil
+from copy import deepcopy
 from random import randrange
 
 import torch
@@ -181,7 +182,7 @@ def main(
     topk_elites = 8,
     num_rollout_repeats = 3,
     learning_rate = 1e-1,
-    weight_decay = 1e-5,
+    regen_reg_rate = 1e-4,
     max_timesteps = 400,
     actor_hidden_dim = 32,
     seed = None,
@@ -229,6 +230,7 @@ def main(
     state_norm = state_norm.to(device)
 
     params = dict(actor.named_parameters())
+    init_params = deepcopy(params)
 
     learning_updates_pbar = tqdm(range(total_learning_updates), position = 0)
 
@@ -342,7 +344,7 @@ def main(
 
         # update the param one by one
 
-        for param, noise in zip(params.values(), noises.values()):
+        for param, init_param, noise in zip(params.values(), init_params.values(), noises.values()):
 
             # add the best "elite" noise directions weighted by eq (3)
 
@@ -350,7 +352,7 @@ def main(
 
             grad = einsum(best_noises, weights, 'n ..., n -> ...')
 
-            param.data.mul_(1. - weight_decay).add_(grad * learning_rate)
+            param.data.lerp_(init_param, regen_reg_rate).add_(grad * learning_rate)
 
         learning_updates_pbar.set_description(join([
             f'best: {reward_mean.amax().item():.2f}',
