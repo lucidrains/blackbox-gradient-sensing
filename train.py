@@ -15,6 +15,8 @@ torch.set_float32_matmul_precision('high')
 
 from einops import reduce, rearrange, reduce, einsum, pack, unpack
 
+from torch.nn.utils.parametrizations import weight_norm
+
 from tqdm import tqdm
 
 import gymnasium as gym
@@ -106,70 +108,34 @@ class Actor(Module):
         state_dim,
         hidden_dim,
         num_actions,
-        depth = 2,
-        expansion_factor = 4.
     ):
         super().__init__()
-
         self.proj_in = nn.Linear(state_dim, hidden_dim, bias = False)
+        self.proj_in = weight_norm(self.proj_in, name = 'weight', dim = None)
 
-        dim_inner = int(hidden_dim * expansion_factor)
-
-        # rnn
-
-        self.rnn = nn.GRU(hidden_dim, hidden_dim, batch_first = True)
-        self.gru_out_norm = nn.RMSNorm(hidden_dim)
-
-        # layers
-
-        layers = []
-
-        for ind in range(depth):
-
-            layer = nn.Sequential(
-                nn.RMSNorm(hidden_dim),
-                nn.Linear(hidden_dim, dim_inner, bias = False),
-                nn.ReLU(),
-                nn.Linear(dim_inner, hidden_dim, bias = False),
-                nn.RMSNorm(hidden_dim),
-            )
-
-            layers.append(layer)
-
-        # final layer out
-
-        self.layers = ModuleList(layers)
-
-        self.final_norm = nn.RMSNorm(hidden_dim)
+        self.to_embed = nn.Linear(hidden_dim, hidden_dim, bias = False)
+        self.to_embed = weight_norm(self.to_embed, name = 'weight', dim = None)
 
         self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
+        self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
 
-        self.register_buffer('init_mem', torch.zeros(1, hidden_dim))
+    def norm_weights_(self):
+        for param in self.parameters():
+            if not isinstance(param, nn.Linear):
+                continue
+
+            param.parametrization.weight.original.copy_(param.weight)
 
     @torch.compile
     def forward(
         self,
         x,
-        past_mem
     ):
-
         x = self.proj_in(x)
-
-        for layer in self.layers:
-            x = layer(x) + x
-
-        embed = self.final_norm(x)
-
-        embed = rearrange(embed, '... -> 1 ...')
-        retrieved, next_mem = self.rnn(embed, past_mem)
-        retrieved = rearrange(retrieved, '1 ... -> ...')
-
-        retrieved = self.gru_out_norm(retrieved)
-        embed = embed + retrieved
-
-        logits = self.to_logits(embed)
-
-        return logits, next_mem
+        x = F.silu(x)
+        x = self.to_embed(x)
+        x = F.silu(x)
+        return self.to_logits(x)
 
 # main
 
@@ -177,12 +143,11 @@ class Actor(Module):
 def main(
     env_name = 'LunarLander-v3',
     total_learning_updates = 1000,
-    noise_pop_size = 40,
-    noise_std_dev = 0.025, # Appendix F in paper, appears to be constant for sim and real
-    topk_elites = 8,
-    num_rollout_repeats = 3,
-    learning_rate = 2e-2,
-    regen_reg_rate = 1e-4,
+    noise_pop_size = 50,
+    noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
+    topk_elites = 10,
+    num_rollout_repeats = 2,
+    learning_rate = 8e-2,
     max_timesteps = 400,
     actor_hidden_dim = 32,
     seed = None,
@@ -230,7 +195,6 @@ def main(
     state_norm = state_norm.to(device)
 
     params = dict(actor.named_parameters())
-    init_params = deepcopy(params)
 
     learning_updates_pbar = tqdm(range(total_learning_updates), position = 0)
 
@@ -250,9 +214,9 @@ def main(
         for key, param in params.items():
             noises_for_param = torch.randn((noise_pop_size + 1, *param.shape), device = device)
 
-            noises_for_param, ps = pack([noises_for_param], 'n *')
-            nn.init.orthogonal_(noises_for_param)            
-            noises_for_param, = unpack(noises_for_param, ps, 'n *')
+            # noises_for_param, ps = pack([noises_for_param], 'n *')
+            # nn.init.orthogonal_(noises_for_param)            
+            # noises_for_param, = unpack(noises_for_param, ps, 'n *')
 
             noises_for_param[0].zero_() # first is for baseline
 
@@ -274,8 +238,6 @@ def main(
 
                     total_reward = 0.
 
-                    mem = actor.init_mem
-
                     for timestep in range(max_timesteps):
 
                         state = torch.from_numpy(state).to(device)
@@ -285,7 +247,7 @@ def main(
                         state_norm.eval()
                         normed_state = state_norm(state)
 
-                        action_logits, mem = functional_call(actor, param_with_noise, (normed_state, mem))
+                        action_logits = functional_call(actor, param_with_noise, normed_state)
 
                         action = gumbel_sample(action_logits)
                         action = action.item()
@@ -336,15 +298,19 @@ def main(
 
         k = min(topk_elites, reward_deltas.numel() // 2)
 
-        ranked_reward_deltas, ranked_reward_indices = reward_deltas.topk(k, dim = 0)
+        ranked_reward_deltas, ranked_reward_indices = reward_deltas.abs().topk(k, dim = 0)
 
         # get the weights for the weighted sum of the topk noise according to eq (3)
 
         weights = ranked_reward_deltas / reward_std.clamp(min = 1e-3)
 
+        # multiply by sign
+
+        weights *= torch.sign(reward_deltas[ranked_reward_indices]
+)
         # update the param one by one
 
-        for param, init_param, noise in zip(params.values(), init_params.values(), noises.values()):
+        for param, noise in zip(params.values(), noises.values()):
 
             # add the best "elite" noise directions weighted by eq (3)
 
@@ -352,7 +318,9 @@ def main(
 
             grad = einsum(best_noises, weights, 'n ..., n -> ...')
 
-            param.data.lerp_(init_param, regen_reg_rate).add_(grad * learning_rate)
+            param.data.add_(grad * learning_rate)
+
+        actor.norm_weights_()
 
         learning_updates_pbar.set_description(join([
             f'best: {reward_mean.amax().item():.2f}',
