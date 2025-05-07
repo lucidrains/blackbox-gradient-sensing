@@ -33,6 +33,9 @@ def default(v, d):
 def divisible_by(num, den):
     return (num % den) == 0
 
+def join(arr, delimiter):
+    return delimiter.join(arr)
+
 def is_empty(t):
     return t.numel() == 0
 
@@ -96,33 +99,6 @@ class StateNorm(Module):
 
         return normed
 
-class LinearAttention(Module):
-    """ small linear attention module for memory """
-
-    def __init__(
-        self,
-        dim
-    ):
-        super().__init__()
-        self.norm = nn.RMSNorm(dim)
-        self.to_forget = nn.Linear(dim, 1, bias = False)
-        self.to_qkv = nn.Linear(dim, dim * 3, bias = False)
-
-    def forward(self, x, past_mem):
-        x = self.norm(x)
-        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
-
-        q, k = map(F.silu, (q, k))
-
-        new_mem = einsum(k, v, '... d, ... e -> ... d e')
-
-        forget = self.to_forget(x).sigmoid()
-
-        mem = past_mem.lerp(new_mem, forget)
-
-        retrieved = einsum(q, mem, '... d, ... d e -> ... e')
-        return retrieved, mem
-
 class Actor(Module):
     def __init__(
         self,
@@ -130,13 +106,18 @@ class Actor(Module):
         hidden_dim,
         num_actions,
         depth = 2,
-        expansion_factor = 2.
+        expansion_factor = 4.
     ):
         super().__init__()
 
-        self.proj_in = nn.Linear(state_dim, hidden_dim)
+        self.proj_in = nn.Linear(state_dim, hidden_dim, bias = False)
 
         dim_inner = int(hidden_dim * expansion_factor)
+
+        # rnn
+
+        self.rnn = nn.GRU(hidden_dim, hidden_dim, batch_first = True)
+        self.gru_out_norm = nn.RMSNorm(hidden_dim)
 
         # layers
 
@@ -146,16 +127,13 @@ class Actor(Module):
 
             layer = nn.Sequential(
                 nn.RMSNorm(hidden_dim),
-                nn.Linear(hidden_dim, dim_inner),
+                nn.Linear(hidden_dim, dim_inner, bias = False),
                 nn.ReLU(),
-                nn.Linear(dim_inner, hidden_dim),
+                nn.Linear(dim_inner, hidden_dim, bias = False),
+                nn.RMSNorm(hidden_dim),
             )
 
             layers.append(layer)
-
-        # small memory layer
-
-        self.mem = LinearAttention(hidden_dim)
 
         # final layer out
 
@@ -163,9 +141,9 @@ class Actor(Module):
 
         self.final_norm = nn.RMSNorm(hidden_dim)
 
-        self.to_logits = nn.Linear(hidden_dim, num_actions)
+        self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
 
-        self.register_buffer('init_mem', torch.zeros(hidden_dim, hidden_dim))
+        self.register_buffer('init_mem', torch.zeros(1, hidden_dim))
 
     @torch.compile
     def forward(
@@ -179,13 +157,17 @@ class Actor(Module):
         for layer in self.layers:
             x = layer(x) + x
 
-        retrieved, next_mem = self.mem(x, past_mem)
-
-        x = x + retrieved
-
         embed = self.final_norm(x)
 
+        embed = rearrange(embed, '... -> 1 ...')
+        retrieved, next_mem = self.rnn(embed, past_mem)
+        retrieved = rearrange(retrieved, '1 ... -> ...')
+
+        retrieved = self.gru_out_norm(retrieved)
+        embed = embed + retrieved
+
         logits = self.to_logits(embed)
+
         return logits, next_mem
 
 # main
@@ -195,11 +177,11 @@ def main(
     env_name = 'LunarLander-v3',
     total_learning_updates = 1000,
     noise_pop_size = 40,
-    noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
+    noise_std_dev = 0.025, # Appendix F in paper, appears to be constant for sim and real
     topk_elites = 8,
-    num_rollout_repeats = 2,
-    learning_rate = 1e-3,
-    weight_decay = 0.9999,
+    num_rollout_repeats = 3,
+    learning_rate = 1e-1,
+    weight_decay = 1e-5,
     max_timesteps = 400,
     actor_hidden_dim = 32,
     seed = None,
@@ -254,7 +236,7 @@ def main(
 
         # keep track of the rewards received per noise and its negative
 
-        reward_stats = torch.zeros((noise_pop_size, 2, num_rollout_repeats)).to(device)
+        reward_stats = torch.zeros((noise_pop_size + 1, 2, num_rollout_repeats)).to(device)
 
         episode_seed = randrange(int(1e7))
 
@@ -264,15 +246,17 @@ def main(
         noises = dict()
 
         for key, param in params.items():
-            noises_for_param = torch.randn((noise_pop_size, *param.shape), device = device)
+            noises_for_param = torch.randn((noise_pop_size + 1, *param.shape), device = device)
 
             noises_for_param, ps = pack([noises_for_param], 'n *')
             nn.init.orthogonal_(noises_for_param)            
             noises_for_param, = unpack(noises_for_param, ps, 'n *')
 
+            noises_for_param[0].zero_() # first is for baseline
+
             noises[key] = noises_for_param * noise_std_dev
 
-        for noise_index in tqdm(range(noise_pop_size), desc = 'noise index', position = 1, leave = False):
+        for noise_index in tqdm(range(noise_pop_size + 1), desc = 'noise index', position = 1, leave = False):
 
             noise = {key: noises_for_param[noise_index] for key, noises_for_param in noises.items()}
 
@@ -333,21 +317,28 @@ def main(
 
         reward_mean = reduce(reward_stats, 'n s e -> n s', 'mean')
 
+        baseline_mean, reward_mean = reward_mean[0].mean(), reward_mean[1:]
+
         reward_deltas = reward_mean[:, 0] - reward_mean[:, 1]
+
+        # mask out any noise candidates whose max reward mean is greater than baseline
+
+        accept_mask = torch.amax(reward_mean, dim = -1) > baseline_mean
+
+        reward_deltas = reward_deltas[accept_mask]
+
+        if reward_deltas.numel() < 2:
+            continue
 
         # get the topk elite indices
 
-        ranked_reward_deltas, ranked_reward_indices = reward_deltas.abs().topk(topk_elites, dim = 0)
+        k = min(topk_elites, reward_deltas.numel() // 2)
+
+        ranked_reward_deltas, ranked_reward_indices = reward_deltas.topk(k, dim = 0)
 
         # get the weights for the weighted sum of the topk noise according to eq (3)
 
-        weights = ranked_reward_deltas / reward_std.clamp(min = 1e-3) * learning_rate
-
-        # modulate the weights by sign and whether the reward for pos/neg noise is greater than baseline or not
-
-        delta_signs = reward_deltas[ranked_reward_indices].sign() # since using absolute value
-
-        weights *= delta_signs
+        weights = ranked_reward_deltas / reward_std.clamp(min = 1e-3)
 
         # update the param one by one
 
@@ -355,13 +346,17 @@ def main(
 
             # add the best "elite" noise directions weighted by eq (3)
 
-            best_noises = noise[ranked_reward_indices]
+            best_noises = noise[1:][accept_mask][ranked_reward_indices]
 
-            update = einsum(best_noises, weights, 'n ..., n -> ...')
+            grad = einsum(best_noises, weights, 'n ..., n -> ...')
 
-            param.data.mul_(weight_decay).add_(update)
+            param.data.mul_(1. - weight_decay).add_(grad * learning_rate)
 
-        learning_updates_pbar.set_description(f'best: {reward_mean.amax().item():.2f} | best delta: {ranked_reward_deltas.amax().item():.2f}')
+        learning_updates_pbar.set_description(join([
+            f'best: {reward_mean.amax().item():.2f}',
+            f'best delta: {ranked_reward_deltas.amax().item():.2f}',
+            f'accepted: {accept_mask.sum().item()} / {noise_pop_size}'
+        ], ' | '))
 
 if __name__ == '__main__':
     fire.Fire(main)
