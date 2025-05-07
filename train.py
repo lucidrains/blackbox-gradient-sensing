@@ -181,7 +181,7 @@ def main(
     noise_std_dev = 0.025, # Appendix F in paper, appears to be constant for sim and real
     topk_elites = 8,
     num_rollout_repeats = 3,
-    learning_rate = 1e-1,
+    learning_rate = 2e-2,
     regen_reg_rate = 1e-4,
     max_timesteps = 400,
     actor_hidden_dim = 32,
@@ -199,7 +199,7 @@ def main(
         if clear_videos:
             rmtree(video_folder, ignore_errors = True)
 
-        den = noise_pop_size * 2 * num_rollout_repeats
+        den = (noise_pop_size + 1) * 2 * num_rollout_repeats
         total_eps_before_update = ceil(min_eps_before_update / den) * den
 
         env = gym.wrappers.RecordVideo(
