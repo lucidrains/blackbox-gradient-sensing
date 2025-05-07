@@ -17,6 +17,8 @@ from einops import reduce, rearrange, reduce, einsum, pack, unpack
 
 from torch.nn.utils.parametrizations import weight_norm
 
+from adam_atan2_pytorch import AdoptAtan2
+
 from tqdm import tqdm
 
 import gymnasium as gym
@@ -119,6 +121,8 @@ class Actor(Module):
         self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
         self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
 
+        self.norm_weights_()
+
     def norm_weights_(self):
         for param in self.parameters():
             if not isinstance(param, nn.Linear):
@@ -143,11 +147,12 @@ class Actor(Module):
 def main(
     env_name = 'LunarLander-v3',
     total_learning_updates = 1000,
-    noise_pop_size = 50,
+    noise_pop_size = 40,
     noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
-    topk_elites = 10,
-    num_rollout_repeats = 2,
+    num_elites = 8,
+    num_rollout_repeats = 3,
     learning_rate = 8e-2,
+    betas = (0.9, 0.95),
     max_timesteps = 400,
     actor_hidden_dim = 32,
     seed = None,
@@ -156,7 +161,7 @@ def main(
     video_folder = './lunar-bgs-recording',
     min_eps_before_update = 500
 ):
-    assert topk_elites < noise_pop_size
+    assert num_elites < noise_pop_size
 
     env = gym.make(env_name, render_mode = 'rgb_array')
 
@@ -187,14 +192,19 @@ def main(
         state_dim,
         actor_hidden_dim,
         num_actions = num_actions
-    )
+    ).to(device)
 
-    state_norm = StateNorm(state_dim)
-
-    actor = actor.to(device)
-    state_norm = state_norm.to(device)
+    # params
 
     params = dict(actor.named_parameters())
+
+    # optim
+
+    optim = AdoptAtan2(actor.parameters(), lr = learning_rate, betas = betas)
+
+    # state norm
+
+    state_norm = StateNorm(state_dim).to(device)
 
     learning_updates_pbar = tqdm(range(total_learning_updates), position = 0)
 
@@ -213,10 +223,6 @@ def main(
 
         for key, param in params.items():
             noises_for_param = torch.randn((noise_pop_size + 1, *param.shape), device = device)
-
-            # noises_for_param, ps = pack([noises_for_param], 'n *')
-            # nn.init.orthogonal_(noises_for_param)            
-            # noises_for_param, = unpack(noises_for_param, ps, 'n *')
 
             noises_for_param[0].zero_() # first is for baseline
 
@@ -294,9 +300,11 @@ def main(
         if reward_deltas.numel() < 2:
             continue
 
-        # get the topk elite indices
+        num_accepted = accept_mask.sum().item()
 
-        k = min(topk_elites, reward_deltas.numel() // 2)
+        # get the top performing noise indices
+
+        k = min(num_elites, reward_deltas.numel() // 2)
 
         ranked_reward_deltas, ranked_reward_indices = reward_deltas.abs().topk(k, dim = 0)
 
@@ -316,16 +324,19 @@ def main(
 
             best_noises = noise[1:][accept_mask][ranked_reward_indices]
 
-            grad = einsum(best_noises, weights, 'n ..., n -> ...')
+            update = einsum(best_noises, weights, 'n ..., n -> ...')
 
-            param.data.add_(grad * learning_rate)
+            param.grad = -update
+
+        optim.step()
+        optim.zero_grad()
 
         actor.norm_weights_()
 
         learning_updates_pbar.set_description(join([
             f'best: {reward_mean.amax().item():.2f}',
             f'best delta: {ranked_reward_deltas.amax().item():.2f}',
-            f'accepted: {accept_mask.sum().item()} / {noise_pop_size}'
+            f'accepted: {num_accepted} / {noise_pop_size}'
         ], ' | '))
 
 if __name__ == '__main__':
