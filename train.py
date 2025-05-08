@@ -112,7 +112,9 @@ class Actor(Module):
         num_actions,
     ):
         super().__init__()
-        self.proj_in = nn.Linear(state_dim, hidden_dim, bias = False)
+        self.mem_norm = nn.RMSNorm(hidden_dim)
+
+        self.proj_in = nn.Linear(state_dim, hidden_dim + 1, bias = False)
         self.proj_in = weight_norm(self.proj_in, name = 'weight', dim = None)
 
         self.to_embed = nn.Linear(hidden_dim, hidden_dim, bias = False)
@@ -122,6 +124,8 @@ class Actor(Module):
         self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
 
         self.norm_weights_()
+
+        self.register_buffer('init_mem', torch.zeros(hidden_dim))
 
     def norm_weights_(self):
         for param in self.parameters():
@@ -134,12 +138,20 @@ class Actor(Module):
     def forward(
         self,
         x,
+        past_mem
     ):
         x = self.proj_in(x)
+        x, forget = x[:-1], x[-1]
+
         x = F.silu(x)
+
+        past_mem = self.mem_norm(past_mem) * forget.sigmoid()
+        x = x + past_mem
+
         x = self.to_embed(x)
         x = F.silu(x)
-        return self.to_logits(x)
+
+        return self.to_logits(x), x
 
 # main
 
@@ -152,6 +164,7 @@ def main(
     num_elites = 8,
     num_rollout_repeats = 3,
     learning_rate = 8e-2,
+    weight_decay = 1e-4,
     betas = (0.9, 0.95),
     max_timesteps = 400,
     actor_hidden_dim = 32,
@@ -244,6 +257,8 @@ def main(
 
                     total_reward = 0.
 
+                    mem = actor.init_mem
+
                     for timestep in range(max_timesteps):
 
                         state = torch.from_numpy(state).to(device)
@@ -253,7 +268,7 @@ def main(
                         state_norm.eval()
                         normed_state = state_norm(state)
 
-                        action_logits = functional_call(actor, param_with_noise, normed_state)
+                        action_logits, mem = functional_call(actor, param_with_noise, (normed_state, mem))
 
                         action = gumbel_sample(action_logits)
                         action = action.item()
@@ -327,6 +342,11 @@ def main(
             update = einsum(best_noises, weights, 'n ..., n -> ...')
 
             param.grad = -update
+
+            # decay for rmsnorm back to identity
+
+            if isinstance(param, nn.RMSNorm):
+                param.data.gamma.lerp_(torch.ones_like(param.gamma), weight_decay)
 
         optim.step()
         optim.zero_grad()
