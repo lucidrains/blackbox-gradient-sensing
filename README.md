@@ -4,6 +4,8 @@ Explorations into Blackbox Gradient Sensing (BGS), an evolutionary strategies ap
 
 Note: This paper is from 2022, and PPO is now being used for sim2real for humanoid robots (contradicting the author). However, this is the only work that I know of that successfully deployed a policy trained with ES, so worth putting out there, even if it is not quite there yet.
 
+Will also improvise in a population based variant. Of all the things going on in evolutionary field, I believe crossover may be one of the most important.
+
 ## Usage
 
 ```python
