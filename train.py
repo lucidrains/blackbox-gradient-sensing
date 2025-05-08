@@ -165,6 +165,7 @@ def main(
     num_rollout_repeats = 3,
     learning_rate = 8e-2,
     weight_decay = 1e-4,
+    cautious_factor = 0.1,
     betas = (0.9, 0.95),
     max_timesteps = 400,
     actor_hidden_dim = 32,
@@ -213,7 +214,7 @@ def main(
 
     # optim
 
-    optim = AdoptAtan2(actor.parameters(), lr = learning_rate, betas = betas)
+    optim = AdoptAtan2(actor.parameters(), lr = learning_rate, betas = betas, cautious_factor = cautious_factor)
 
     # state norm
 
