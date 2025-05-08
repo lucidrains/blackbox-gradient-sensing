@@ -161,6 +161,7 @@ def main(
     total_learning_updates = 1000,
     noise_pop_size = 40,
     noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
+    factorized_noise = True,
     num_elites = 8,
     num_rollout_repeats = 3,
     learning_rate = 8e-2,
@@ -236,7 +237,17 @@ def main(
         noises = dict()
 
         for key, param in params.items():
-            noises_for_param = torch.randn((noise_pop_size + 1, *param.shape), device = device)
+
+            if factorized_noise and param.ndim == 2:
+                i, j = param.shape
+
+                rows = torch.randn((noise_pop_size + 1, i, 1), device = device)
+                cols = torch.randn((noise_pop_size + 1, 1, j), device = device)
+                rows, cols = tuple(t.sign() * t.abs().sqrt() for t in (rows, cols))
+
+                noises_for_param = rows * cols
+            else:
+                noises_for_param = torch.randn((noise_pop_size + 1, *param.shape), device = device)
 
             noises_for_param[0].zero_() # first is for baseline
 
