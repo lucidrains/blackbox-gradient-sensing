@@ -5,12 +5,14 @@ from shutil import rmtree
 from math import ceil
 from copy import deepcopy
 from random import randrange
+from functools import partial
 
 import torch
 from torch import nn, tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
 from torch.func import functional_call
+import torch.distributed as dist
 torch.set_float32_matmul_precision('high')
 
 from einops import reduce, rearrange, reduce, einsum, pack, unpack
@@ -19,13 +21,11 @@ from torch.nn.utils.parametrizations import weight_norm
 
 from adam_atan2_pytorch import AdoptAtan2
 
-from tqdm import tqdm
+from tqdm import tqdm as orig_tqdm
 
 import gymnasium as gym
 
-# constants
-
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+from accelerate import Accelerator
 
 # helpers
 
@@ -58,13 +58,22 @@ def gumbel_sample(t, temp = 1.):
 
     return t.argmax(dim = -1)
 
+# distributed
+
+def maybe_all_reduce_mean(t):
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return t
+
+    dist.all_reduce(t)
+    return t / dist.get_world_size()
+
 # networks
 
 class StateNorm(Module):
     def __init__(
         self,
         dim,
-        eps = 1e-5
+        eps = 1e-5,
     ):
         # equation (3) in https://arxiv.org/abs/2410.09754
         super().__init__()
@@ -93,6 +102,8 @@ class StateNorm(Module):
         # update running mean and variance
 
         new_obs_mean = reduce(state, '... d -> d', 'mean')
+        new_obs_mean = maybe_all_reduce_mean(new_obs_mean)
+
         delta = new_obs_mean - mean
 
         new_mean = mean + delta / time
@@ -176,11 +187,23 @@ def main(
     video_folder = './lunar-bgs-recording',
     min_eps_before_update = 500
 ):
+    accelerator = Accelerator()
+
+    is_distributed, world_size, rank, is_main, device = (
+        accelerator.use_distributed,
+        accelerator.num_processes,
+        accelerator.process_index,
+        accelerator.is_main_process,
+        accelerator.device
+    )
+
+    tqdm = partial(orig_tqdm, disable = not is_main)
+
     assert num_elites < noise_pop_size
 
     env = gym.make(env_name, render_mode = 'rgb_array')
 
-    if render:
+    if render and is_main:
         if clear_videos:
             rmtree(video_folder, ignore_errors = True)
 
@@ -195,6 +218,8 @@ def main(
             disable_logger = True
         )
 
+    accelerator.wait_for_everyone()
+
     state_dim = env.observation_space.shape[0]
     num_actions = env.action_space.n
 
@@ -208,6 +233,9 @@ def main(
         actor_hidden_dim,
         num_actions = num_actions
     ).to(device)
+
+    for param in actor.parameters():
+        accelerator.reduce(param.data)
 
     # params
 
@@ -224,6 +252,12 @@ def main(
     learning_updates_pbar = tqdm(range(total_learning_updates), position = 0)
 
     for _ in learning_updates_pbar:
+
+        # synchronize a global seed
+
+        if is_distributed:
+            seed = accelerator.reduce(tensor(randrange(int(1e7)), device = device))
+            torch.manual_seed(seed.item())
 
         # keep track of the rewards received per noise and its negative
 
@@ -253,7 +287,14 @@ def main(
 
             noises[key] = noises_for_param * noise_std_dev
 
-        for noise_index in tqdm(range(noise_pop_size + 1), desc = 'noise index', position = 1, leave = False):
+        # maybe shard the interaction with environments for the individual noise perturbations
+
+        noise_indices = torch.arange(noise_pop_size + 1, device = device)
+        noises_for_machine = noise_indices.chunk(world_size)[rank].tolist()
+
+        assert len(noises_for_machine) > 0
+
+        for noise_index in tqdm(noises_for_machine, desc = 'noise index', position = 1, leave = False):
 
             noise = {key: noises_for_param[noise_index] for key, noises_for_param in noises.items()}
 
@@ -297,6 +338,17 @@ def main(
                         state = next_state
                 
                     reward_stats[noise_index, sign_index, repeat_index] = total_reward
+
+        # maybe synchronize reward stats, as well as min episode length for updating state norm
+
+        if is_distributed:
+            reward_stats = accelerator.reduce(reward_stats)
+
+            episode_state_len = tensor(len(episode_states), device = device)
+
+            min_episode_state_len = accelerator.gather(episode_state_len).amin().item()
+
+            episode_states = episode_states[:min_episode_state_len]
 
         # update state norm with one episode worth (as it is repeated)
 

@@ -24,6 +24,20 @@ Then
 $ python train.py
 ```
 
+## Distributed using 🤗 accelerate
+
+First
+
+```bash
+$ accelerate config
+```
+
+Then
+
+```bash
+$ accelerate launch train.py
+```
+
 ## Citations
 
 ```bibtex

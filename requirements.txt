@@ -1,3 +1,4 @@
+accelerate
 adam-atan2-pytorch
 box2d-py
 einops>=0.8.0
