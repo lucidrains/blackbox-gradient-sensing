@@ -6,7 +6,53 @@ Note: This paper is from 2022, and PPO is now being used for sim2real for humano
 
 Will also improvise in a population based variant. Of all the things going on in evolutionary field, I believe crossover may be one of the most important.
 
+## Install
+
+```bash
+$ pip install blackbox-gradient-sensing
+```
+
 ## Usage
+
+```python
+# mock env
+
+import numpy as np
+
+class Sim:
+    def reset(self, seed = None):
+        return np.random.randn(5) # state
+
+    def step(self, actions):
+        return np.random.randn(5), np.random.randn(1), False, False # state, reward, terminated, truncated
+
+sim = Sim()
+
+# instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
+# you can also supply your own Actor, which simply receives a state tensor and outputs action logits
+
+from bgs import BlackboxGradientSensing, Actor
+
+actor = Actor(
+    dim_state = 5,
+    num_actions = 2
+)
+
+bgs = BlackboxGradientSensing(
+    actor,
+    dim_state = 5,
+    noise_pop_size = 10,
+    num_rollout_repeats = 1
+)
+
+bgs(sim, 1000) # pass the simulation environment in - say for 1000 interactions with env
+
+# after much training, save your learned policy for finetuning on real env
+
+actor.save('./sim-trained-actor.pt')
+```
+
+## Example
 
 ```python
 $ pip install -r requirements.txt  # or `uv pip install`, to keep up with the times

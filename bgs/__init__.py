@@ -1,2 +1,5 @@
-from bgs.bgs import BlackboxGradientSensing
-
+from bgs.bgs import (
+    BlackboxGradientSensing,
+    Actor,
+    StateNorm
+)
