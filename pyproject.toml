@@ -1,6 +1,6 @@
 [project]
 name = "blackbox-gradient-sensing"
-version = "0.0.6"
+version = "0.0.7"
 description = "Blackbox Gradient Sensing"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -53,4 +53,4 @@ dev-dependencies = [
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["bgs"]
+packages = ["blackbox_gradient_sensing"]

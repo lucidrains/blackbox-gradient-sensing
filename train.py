@@ -1,4 +1,4 @@
-from bgs import BlackboxGradientSensing, Actor
+from blackbox_gradient_sensing import BlackboxGradientSensing, Actor
 
 # hyperparams
 
