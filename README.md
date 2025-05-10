@@ -1,6 +1,6 @@
 ## Blackbox Gradient Sensing (wip)
 
-Explorations into Blackbox Gradient Sensing (BGS), an evolutionary strategies approach proposed in a [Google Deepmind paper](https://arxiv.org/abs/2207.06572) for Table Tennis
+Implementation and explorations into Blackbox Gradient Sensing (BGS), an evolutionary strategies approach proposed in a [Google Deepmind paper](https://arxiv.org/abs/2207.06572) for Table Tennis
 
 Note: This paper is from 2022, and PPO is now being used for sim2real for humanoid robots (contradicting the author). However, this is the only work that I know of that successfully deployed a policy trained with ES, so worth putting out there, even if it is not quite there yet.
 
