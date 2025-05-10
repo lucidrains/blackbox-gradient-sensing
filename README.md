@@ -46,10 +46,9 @@ bgs = BlackboxGradientSensing(
 
 bgs(sim, 100) # pass the simulation environment in - say for 100 interactions with env
 
-# after much training, save your learned policy for finetuning on real env
+# after much training, save your learned policy (and optional state normalization) for finetuning on real env
 
-save(actor.state_dict(), './sim-trained-actor.pt')
-
+bgs.save('./actor-and-state-norm.pt')
 ```
 
 ## Example

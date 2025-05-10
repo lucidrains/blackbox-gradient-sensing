@@ -5,6 +5,7 @@ from math import ceil
 from copy import deepcopy
 from random import randrange
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 
@@ -244,6 +245,38 @@ class BlackboxGradientSensing(Module):
         # number of interactions with environment for learning
 
         self.num_env_interactions = num_env_interactions
+
+    def save(self, path, overwrite = False):
+
+        acc = self.accelerator
+
+        acc.wait_for_everyone()
+
+        if not acc.is_main_process:
+            return
+
+        path = Path(path)
+        assert overwrite or not path.exists()
+
+        pkg = dict(
+            actor = self.actor.state_dict(),
+            state_norm = self.state_norm.state_dict() if self.use_state_norm else None
+        )
+
+        torch.save(pkg, str(path))
+
+    def load(self, path):
+        path = Path(path)
+
+        assert path.exists()
+
+        pkg = torch.load(str(path), weights_only = True)
+
+        self.actor.load_state_dict(pkg['actor'])
+
+        if self.use_state_norm:
+            assert 'state_norm' in pkg
+            self.state_norm.load_state_dict(pkg['state_norm'])
 
     @torch.inference_mode()
     def forward(
