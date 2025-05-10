@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from shutil import rmtree
-from math import ceil
 from copy import deepcopy
 from random import randrange
 from functools import partial
