@@ -175,7 +175,7 @@ class BlackboxGradientSensing(Module):
         accelerator: Accelerator | None = None,
         dim_state = None,
         use_state_norm = True,
-        pass_mem_to_actor = False,
+        actor_is_recurrent = False,
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
@@ -216,7 +216,7 @@ class BlackboxGradientSensing(Module):
 
         self.actor = actor.to(device)
 
-        self.pass_mem_to_actor = pass_mem_to_actor # if set to True, actor must pass out the memory on forward on the second position, then receive it as a kwarg of `hiddens`
+        self.actor_is_recurrent = actor_is_recurrent # if set to True, actor must pass out the memory on forward on the second position, then receive it as a kwarg of `hiddens`
 
         # optim
 
@@ -262,7 +262,7 @@ class BlackboxGradientSensing(Module):
 
         acc, optim, actor = self.accelerator, self.optim, self.actor
 
-        is_recurrent_actor = self.pass_mem_to_actor
+        is_recurrent_actor = self.actor_is_recurrent
 
         if torch_compile:
             actor = torch.compile(actor)

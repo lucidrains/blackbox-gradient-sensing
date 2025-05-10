@@ -45,7 +45,7 @@ bgs = BlackboxGradientSensing(
     dim_state = dim_state,
     noise_pop_size = num_noises,
     num_rollout_repeats = num_repeats,
-    pass_mem_to_actor = True
+    actor_is_recurrent = True
 )
 
 bgs(sim, 1000, torch_compile = True) # pass the simulation environment in - say for 1000 interactions with env
