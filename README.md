@@ -31,25 +31,25 @@ sim = Sim()
 # instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
 # you can also supply your own Actor, which simply receives a state tensor and outputs action logits
 
-from blackbox_gradient_sensing import BlackboxGradientSensing, Actor
+from torch import nn, save
+from blackbox_gradient_sensing import BlackboxGradientSensing
 
-actor = Actor(
-    dim_state = 5,
-    num_actions = 2
-)
+actor = nn.Linear(5, 2) # contrived network from state of 5 dimension to two actions
 
 bgs = BlackboxGradientSensing(
-    actor,
+    actor = actor,
     dim_state = 5,
-    noise_pop_size = 10,
-    num_rollout_repeats = 1
+    noise_pop_size = 10,      # number of noise perturbations
+    num_selected = 2,         # topk noise selected for update
+    num_rollout_repeats = 1   # how many times to redo environment rollout, per noise
 )
 
-bgs(sim, 1000) # pass the simulation environment in - say for 1000 interactions with env
+bgs(sim, 100) # pass the simulation environment in - say for 100 interactions with env
 
 # after much training, save your learned policy for finetuning on real env
 
-actor.save('./sim-trained-actor.pt')
+save(actor.state_dict(), './sim-trained-actor.pt')
+
 ```
 
 ## Example

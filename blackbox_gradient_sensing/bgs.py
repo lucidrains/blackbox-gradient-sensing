@@ -380,6 +380,8 @@ class BlackboxGradientSensing(Module):
 
                             if isinstance(actor_out, tuple):
                                 action_logits, *actor_rest_out = actor_out
+                            else:
+                                action_logits = actor_out
 
                             if is_recurrent_actor:
                                 mem, *_ = actor_rest_out
