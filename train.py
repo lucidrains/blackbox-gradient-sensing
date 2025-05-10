@@ -47,7 +47,7 @@ bgs = BlackboxGradientSensing(
     num_rollout_repeats = num_repeats
 )
 
-bgs(sim, 1000) # pass the simulation environment in - say for 1000 interactions with env
+bgs(sim, 1000, torch_compile = True) # pass the simulation environment in - say for 1000 interactions with env
 
 # after much training, finetune on real env
 

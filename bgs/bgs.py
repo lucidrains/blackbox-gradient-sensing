@@ -145,7 +145,6 @@ class Actor(Module):
 
         self.register_buffer('init_mem', torch.zeros(hidden_dim))
 
-    @torch.compile
     def forward(
         self,
         x,
@@ -243,7 +242,8 @@ class BlackboxGradientSensing(Module):
         num_env_interactions = None,
         show_progress = None,
         seed = None,
-        max_timesteps_per_interaction = 500
+        max_timesteps_per_interaction = 500,
+        torch_compile = False
     ):
         show_progress = default(show_progress, self.show_progress)
         num_env_interactions = default(num_env_interactions, self.num_env_interactions)
@@ -257,6 +257,9 @@ class BlackboxGradientSensing(Module):
         ) = self.num_selected, self.noise_pop_size, self.num_rollout_repeats, self.factorized_noise, self.noise_std_dev
 
         acc, optim, actor = self.accelerator, self.optim, self.actor
+
+        if torch_compile:
+            actor = torch.compile(actor)
 
         is_distributed, world_size, rank, is_main, device = (
             acc.use_distributed,
@@ -357,11 +360,23 @@ class BlackboxGradientSensing(Module):
                             action = gumbel_sample(action_logits)
                             action = action.item()
 
-                            next_state, reward, terminated, truncated, *_ = env.step(action)
+                            step_out = env.step(action)
+
+                            assert isinstance(step_out, tuple)
+
+                            len_step_out = len(step_out)
+
+                            if len_step_out >= 4:
+                                next_state, reward, terminated, truncated, *_ = len_step_out
+                                done = terminated or truncated
+                            elif len_step_out == 3:
+                                next_state, reward, done = step_out
+                            elif len_step_out == 2:
+                                next_state, reward, done = (*step_out, False)
+                            else:
+                                raise RuntimeError('invalid number of items received from environment')
 
                             total_reward += float(reward)
-
-                            done = terminated or truncated
 
                             if done:
                                 break
