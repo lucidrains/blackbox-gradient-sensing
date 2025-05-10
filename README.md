@@ -24,7 +24,7 @@ class Sim:
         return np.random.randn(5) # state
 
     def step(self, actions):
-        return np.random.randn(5), np.random.randn(1), False, False # state, reward, terminated, truncated
+        return np.random.randn(5), np.random.randn(1), False # state, reward, done
 
 sim = Sim()
 
