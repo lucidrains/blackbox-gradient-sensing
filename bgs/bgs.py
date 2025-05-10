@@ -187,6 +187,7 @@ class BlackboxGradientSensing(Module):
         weight_decay = 1e-4,
         betas = (0.9, 0.95),
         max_timesteps = 400,
+        param_names: set[str] | None = None,
         show_progress = True,
         optim_kwargs: dict = dict(
             cautious_factor = 0.1
@@ -218,9 +219,14 @@ class BlackboxGradientSensing(Module):
 
         self.actor_is_recurrent = actor_is_recurrent # if set to True, actor must pass out the memory on forward on the second position, then receive it as a kwarg of `hiddens`
 
+        named_params = dict(actor.named_parameters())
+        self.param_names = default(param_names, set(named_params.keys()))
+
         # optim
 
-        self.optim = optim_klass(actor.parameters(), lr = learning_rate, betas = betas)
+        optim_params = [named_params[param_name] for param_name in self.param_names]
+
+        self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas)
 
         # maybe state norm
 
