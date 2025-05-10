@@ -143,20 +143,21 @@ class Actor(Module):
         self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
         self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
 
-        self.register_buffer('init_mem', torch.zeros(hidden_dim))
+        self.register_buffer('init_hiddens', torch.zeros(hidden_dim))
 
     def forward(
         self,
         x,
-        past_mem
+        hiddens = None
     ):
         x = self.proj_in(x)
         x, forget = x[:-1], x[-1]
 
         x = F.silu(x)
 
-        past_mem = self.mem_norm(past_mem) * forget.sigmoid()
-        x = x + past_mem
+        if exists(hiddens):
+            past_mem = self.mem_norm(hiddens) * forget.sigmoid()
+            x = x + past_mem
 
         x = self.to_embed(x)
         x = F.silu(x)
@@ -174,6 +175,7 @@ class BlackboxGradientSensing(Module):
         accelerator: Accelerator | None = None,
         dim_state = None,
         use_state_norm = True,
+        pass_mem_to_actor = False,
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
@@ -213,6 +215,8 @@ class BlackboxGradientSensing(Module):
         # net
 
         self.actor = actor.to(device)
+
+        self.pass_mem_to_actor = pass_mem_to_actor # if set to True, actor must pass out the memory on forward on the second position, then receive it as a kwarg of `hiddens`
 
         # optim
 
@@ -257,6 +261,8 @@ class BlackboxGradientSensing(Module):
         ) = self.num_selected, self.noise_pop_size, self.num_rollout_repeats, self.factorized_noise, self.noise_std_dev
 
         acc, optim, actor = self.accelerator, self.optim, self.actor
+
+        is_recurrent_actor = self.pass_mem_to_actor
 
         if torch_compile:
             actor = torch.compile(actor)
@@ -343,7 +349,9 @@ class BlackboxGradientSensing(Module):
 
                         total_reward = 0.
 
-                        mem = actor.init_mem
+                        if is_recurrent_actor:
+                            assert hasattr(actor, 'init_hiddens'), 'your actor must have an `init_hiddens` buffer if to be used recurrently'
+                            mem = actor.init_hiddens
 
                         for timestep in range(max_timesteps_per_interaction):
 
@@ -355,12 +363,29 @@ class BlackboxGradientSensing(Module):
                                 self.state_norm.eval()
                                 state = self.state_norm(state)
 
-                            action_logits, mem = functional_call(actor, param_with_noise, (state, mem))
+                            kwargs = dict()
+                            if is_recurrent_actor:
+                                kwargs.update(hiddens = mem)
+
+                            actor_out = functional_call(actor, param_with_noise, state, kwargs = kwargs)
+
+                            # take care of recurrent network
+                            # the nicest thing about ES is learning recurrence / memory without much hassle (in fact, can be non-differentiable)
+
+                            if isinstance(actor_out, tuple):
+                                action_logits, *actor_rest_out = actor_out
+
+                            if is_recurrent_actor:
+                                mem, *_ = actor_rest_out
+
+                            # sample
 
                             action = gumbel_sample(action_logits)
                             action = action.item()
 
                             step_out = env.step(action)
+
+                            # flexible output from env
 
                             assert isinstance(step_out, tuple)
 
