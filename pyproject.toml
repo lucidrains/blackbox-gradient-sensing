@@ -1,6 +1,6 @@
 [project]
 name = "blackbox-gradient-sensing"
-version = "0.0.1"
+version = "0.0.2"
 description = "Blackbox Gradient Sensing"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
