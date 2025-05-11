@@ -356,7 +356,7 @@ class BlackboxGradientSensing(Module):
             pop_size_with_baseline = noise_pop_size + 1
             reward_stats = torch.zeros((pop_size_with_baseline, 2, num_rollout_repeats)).to(device)
 
-            episode_seed = randrange(int(1e7))
+            episode_seed = torch.randint(0, int(1e7), ()).item()
 
             # create noises upfront
 
@@ -382,7 +382,7 @@ class BlackboxGradientSensing(Module):
 
             # maybe shard the interaction with environments for the individual noise perturbations
 
-            noise_indices = torch.arange(noise_pop_size + 1, device = device)
+            noise_indices = torch.arange(pop_size_with_baseline, device = device)
             noises_for_machine = noise_indices.chunk(world_size)[rank].tolist()
 
             assert len(noises_for_machine) > 0
