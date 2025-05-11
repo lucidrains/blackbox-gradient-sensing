@@ -31,7 +31,7 @@ sim = Sim()
 # instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
 # you can also supply your own Actor, which simply receives a state tensor and outputs action logits
 
-from torch import nn, save
+from torch import nn
 from blackbox_gradient_sensing import BlackboxGradientSensing
 
 actor = nn.Linear(5, 2) # contrived network from state of 5 dimension to two actions
