@@ -328,7 +328,7 @@ class BlackboxGradientSensing(Module):
             # synchronize a global seed
 
             if is_distributed:
-                seed = accelerator.reduce(tensor(randrange(int(1e7)), device = device))
+                seed = acc.reduce(tensor(randrange(int(1e7)), device = device))
                 torch.manual_seed(seed.item())
 
             # keep track of the rewards received per noise and its negative
@@ -431,7 +431,7 @@ class BlackboxGradientSensing(Module):
                             len_step_out = len(step_out)
 
                             if len_step_out >= 4:
-                                next_state, reward, terminated, truncated, *_ = len_step_out
+                                next_state, reward, terminated, truncated, *_ = step_out
                                 done = terminated or truncated
                             elif len_step_out == 3:
                                 next_state, reward, done = step_out
