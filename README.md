@@ -4,7 +4,7 @@ Implementation and explorations into Blackbox Gradient Sensing (BGS), an evoluti
 
 Note: This paper is from 2022, and PPO is now being used for sim2real for humanoid robots (contradicting the author). However, this is the only work that I know of that successfully deployed a policy trained with ES, so worth putting out there, even if it is not quite there yet.
 
-Will also incorporate the latent population variant successfully used in [EPO](https://github.com/lucidrains/evolutionary-policy-optimization). Of all the things going on in evolutionary field, I believe crossover may be one of the most important.
+Will also incorporate the latent population variant used in [EPO](https://github.com/lucidrains/evolutionary-policy-optimization). Of all the things going on in evolutionary field, I believe crossover may be one of the most important. This may be the ultimate [bitter lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html).
 
 ## Install
 
@@ -121,5 +121,14 @@ $ accelerate launch train.py
 @misc{Rubin2024,
     author  = {Ohad Rubin},
     url     = {https://medium.com/@ohadrubin/exploring-weight-decay-in-layer-normalization-challenges-and-a-reparameterization-solution-ad4d12c24950}
+}
+```
+
+```bibtex
+@inproceedings{Wang2025EvolutionaryPO,
+    title = {Evolutionary Policy Optimization},
+    author = {Jianren Wang and Yifan Su and Abhinav Gupta and Deepak Pathak},
+    year  = {2025},
+    url   = {https://api.semanticscholar.org/CorpusID:277313729}
 }
 ```

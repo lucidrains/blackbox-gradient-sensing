@@ -18,7 +18,7 @@ torch.set_float32_matmul_precision('high')
 
 from torch.nn.utils.parametrizations import weight_norm
 
-from einops import reduce, rearrange, reduce, einsum, pack, unpack
+from einops import reduce, rearrange, einsum, pack, unpack
 
 from adam_atan2_pytorch import AdoptAtan2
 
@@ -36,6 +36,9 @@ def default(v, d):
 
 def divisible_by(num, den):
     return (num % den) == 0
+
+def xnor(x, y):
+    return not (x ^ y)
 
 def join(arr, delimiter):
     return delimiter.join(arr)
@@ -56,6 +59,9 @@ def gumbel_sample(t, temp = 1.):
         t = (t / temp) + gumbel_noise(t)
 
     return t.argmax(dim = -1)
+
+def l2norm(t):
+    return F.normalize(t, dim = -1, p = 2)
 
 def from_numpy(t):
     if isinstance(t, np.float64):
@@ -130,6 +136,8 @@ class Actor(Module):
         *,
         num_actions,
         hidden_dim = 32,
+        accepts_condition = False,
+        dim_condition = None
     ):
         super().__init__()
         self.mem_norm = nn.RMSNorm(hidden_dim)
@@ -145,6 +153,17 @@ class Actor(Module):
 
         self.norm_weights_()
 
+        # for genes -> expression network (the analogy is growing on me)
+
+        self.accepts_condition = accepts_condition
+        if accepts_condition:
+            assert exists(dim_condition)
+
+            self.encode_condition = nn.Sequential(
+                nn.Linear(dim_condition, hidden_dim),
+                nn.SiLU()
+            )
+
         self.register_buffer('init_hiddens', torch.zeros(hidden_dim))
 
     def norm_weights_(self):
@@ -157,8 +176,11 @@ class Actor(Module):
     def forward(
         self,
         x,
-        hiddens = None
+        hiddens = None,
+        condition = None
     ):
+        assert xnor(exists(condition), self.accepts_condition)
+
         x = self.proj_in(x)
         x, forget = x[:-1], x[-1]
 
@@ -168,10 +190,43 @@ class Actor(Module):
             past_mem = self.mem_norm(hiddens) * forget.sigmoid()
             x = x + past_mem
 
+        if self.accepts_condition:
+            x = x * self.encode_condition(condition)
+
         x = self.to_embed(x)
         x = F.silu(x)
 
         return self.to_logits(x), x
+
+# latent gene pool
+
+# proposed by Wang et al. evolutionary policy optimization (EPO)
+# https://arxiv.org/abs/2503.19037
+
+class LatentGenePool(Module):
+    def __init__(
+        self,
+        dim,
+        num_genes
+    ):
+        super().__init__()
+        assert num_genes > 1
+
+        self.num_genes = num_genes
+        self.genes = nn.Parameter(l2norm(torch.randn(num_genes, dim)))
+
+    def get_gene(self, gene_id):
+        assert 0 <= idx < self.num_genes
+
+        return l2norm(self.genes[gene_id])
+
+    @torch.inference_mode()
+    def cross_over(
+        self,
+        fitnesses
+    ):
+        assert fitnesses.ndim == 1 and fitnesses.shape[0] == self.num_genes
+        raise NotImplementedError
 
 # main class
 
@@ -185,6 +240,10 @@ class BlackboxGradientSensing(Module):
         dim_state = None,
         use_state_norm = True,
         actor_is_recurrent = False,
+        dim_gene = None,
+        num_genes = 1,
+        num_selected_genes = 1,
+        actor_is_latent_conditioned = False,
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
@@ -241,6 +300,15 @@ class BlackboxGradientSensing(Module):
 
         named_params = dict(actor.named_parameters())
         self.param_names = default(param_names, set(named_params.keys()))
+
+        # gene pool, another axis for scaling and bitter lesson
+
+        has_gene_pool = num_genes > 1
+
+        self.has_gene_pool = has_gene_pool
+
+        if has_gene_pool:
+            self.gene_pool = LatentGenePool(dim_gene, num_genes)
 
         # optim
 
@@ -367,7 +435,8 @@ class BlackboxGradientSensing(Module):
             # synchronize a global seed
 
             if is_distributed:
-                seed = acc.reduce(tensor(randrange(int(1e7)), device = device))
+                rand_int = torch.randint(0, int(1e7), (), device = device).item()
+                seed = acc.reduce(rand_int)
                 torch.manual_seed(seed.item())
 
             # keep track of the rewards received per noise and its negative
