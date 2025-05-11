@@ -56,4 +56,4 @@ bgs(sim, 1000) # pass the simulation environment in - say for 1000 interactions 
 
 # after much training, finetune on real env
 
-actor.save('./sim-trained-actor.pt')
+bgs.save('./sim-trained-actor-and-state-norm.pt')
