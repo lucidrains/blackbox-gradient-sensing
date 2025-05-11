@@ -4,6 +4,7 @@ from copy import deepcopy
 from random import randrange
 from functools import partial
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -142,7 +143,16 @@ class Actor(Module):
         self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
         self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
 
+        self.norm_weights_()
+
         self.register_buffer('init_hiddens', torch.zeros(hidden_dim))
+
+    def norm_weights_(self):
+        for param in self.parameters():
+            if not isinstance(param, nn.Linear):
+                continue
+
+            param.parametrization.weight.original.copy_(param.weight)
 
     def forward(
         self,
@@ -191,6 +201,8 @@ class BlackboxGradientSensing(Module):
         optim_kwargs: dict = dict(
             cautious_factor = 0.1
         ),
+        optim_step_post_hook: Callable | None = None,
+        post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict()
     ):
         super().__init__()
@@ -226,6 +238,14 @@ class BlackboxGradientSensing(Module):
         optim_params = [named_params[param_name] for param_name in self.param_names]
 
         self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas)
+
+        # hooks
+
+        if exists(optim_step_post_hook):
+            def hook(*_):
+                optim_step_post_hook()
+
+            self.optim.register_step_post_hook(hook)
 
         # maybe state norm
 
