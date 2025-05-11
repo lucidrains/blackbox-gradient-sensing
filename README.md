@@ -116,3 +116,10 @@ $ accelerate launch train.py
     url     = {https://api.semanticscholar.org/CorpusID:276258971}
 }
 ```
+
+```bibtex
+@misc{Rubin2024,
+    author  = {Ohad Rubin},
+    url     = {https://medium.com/@ohadrubin/exploring-weight-decay-in-layer-normalization-challenges-and-a-reparameterization-solution-ad4d12c24950}
+}
+```

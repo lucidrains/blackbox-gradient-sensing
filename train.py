@@ -48,10 +48,11 @@ bgs = BlackboxGradientSensing(
     num_selected = num_selected,
     num_rollout_repeats = num_repeats,
     actor_is_recurrent = True,
-    optim_step_post_hook = lambda: actor.norm_weights_()
+    optim_step_post_hook = lambda: actor.norm_weights_(),
+    torch_compile_actor = True
 )
 
-bgs(sim, 1000, torch_compile = True) # pass the simulation environment in - say for 1000 interactions with env
+bgs(sim, 1000) # pass the simulation environment in - say for 1000 interactions with env
 
 # after much training, finetune on real env
 

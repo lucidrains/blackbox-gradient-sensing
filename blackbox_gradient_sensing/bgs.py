@@ -203,7 +203,9 @@ class BlackboxGradientSensing(Module):
         ),
         optim_step_post_hook: Callable | None = None,
         post_noise_added_hook: Callable | None = None,
-        accelerate_kwargs: dict = dict()
+        accelerate_kwargs: dict = dict(),
+        cpu = False,
+        torch_compile_actor = True
     ):
         super().__init__()
         assert num_selected < noise_pop_size, f'number of selected noise must be less than the total population of noise'
@@ -219,6 +221,11 @@ class BlackboxGradientSensing(Module):
         # use accelerate to manage distributed
 
         if not exists(accelerator):
+
+            if cpu:
+                assert 'cpu' not in accelerate_kwargs
+                accelerate_kwargs.update(cpu = True)
+
             accelerator = Accelerator(**accelerate_kwargs)
 
         device = accelerator.device
@@ -227,6 +234,8 @@ class BlackboxGradientSensing(Module):
         # net
 
         self.actor = actor.to(device)
+
+        self.torch_compile_actor = torch_compile_actor
 
         self.actor_is_recurrent = actor_is_recurrent # if set to True, actor must pass out the memory on forward on the second position, then receive it as a kwarg of `hiddens`
 
@@ -238,6 +247,8 @@ class BlackboxGradientSensing(Module):
         optim_params = [named_params[param_name] for param_name in self.param_names]
 
         self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas)
+
+        self.weight_decay = weight_decay
 
         # hooks
 
@@ -263,6 +274,13 @@ class BlackboxGradientSensing(Module):
         # number of interactions with environment for learning
 
         self.num_env_interactions = num_env_interactions
+
+        # keep track of number of steps
+
+        self.register_buffer('step', tensor(0))
+
+    def log(self, **data):
+        return self.accelerator.log(data, step = self.step.item())
 
     def save(self, path, overwrite = False):
 
@@ -304,7 +322,6 @@ class BlackboxGradientSensing(Module):
         show_progress = None,
         seed = None,
         max_timesteps_per_interaction = 500,
-        torch_compile = False
     ):
         show_progress = default(show_progress, self.show_progress)
         num_env_interactions = default(num_env_interactions, self.num_env_interactions)
@@ -321,7 +338,7 @@ class BlackboxGradientSensing(Module):
 
         is_recurrent_actor = self.actor_is_recurrent
 
-        if torch_compile:
+        if self.torch_compile_actor:
             actor = torch.compile(actor)
 
         is_distributed, world_size, rank, is_main, device = (
@@ -341,9 +358,11 @@ class BlackboxGradientSensing(Module):
 
         params = dict(self.actor.named_parameters())
 
-        progress_bar = tqdm(range(num_env_interactions), position = 0)
+        learning_updates = tqdm(range(num_env_interactions), position = 0)
 
-        for _ in progress_bar:
+        for _ in learning_updates:
+
+            self.step.add_(1)
 
             # synchronize a global seed
 
@@ -433,8 +452,10 @@ class BlackboxGradientSensing(Module):
                                 action_logits, *actor_rest_out = actor_out
                             else:
                                 action_logits = actor_out
+                                actor_rest_out = []
 
                             if is_recurrent_actor:
+                                assert len(actor_rest_out) > 0
                                 mem, *_ = actor_rest_out
 
                             # sample
@@ -442,21 +463,22 @@ class BlackboxGradientSensing(Module):
                             action = gumbel_sample(action_logits)
                             action = action.item()
 
-                            step_out = env.step(action)
+                            env_out = env.step(action)
 
                             # flexible output from env
 
-                            assert isinstance(step_out, tuple)
+                            assert isinstance(env_out, tuple)
 
-                            len_step_out = len(step_out)
+                            len_env_out = len(env_out)
 
-                            if len_step_out >= 4:
-                                next_state, reward, terminated, truncated, *_ = step_out
+                            if len_env_out >= 4:
+                                next_state, reward, terminated, truncated, *_ = env_out
                                 done = terminated or truncated
-                            elif len_step_out == 3:
-                                next_state, reward, done = step_out
-                            elif len_step_out == 2:
-                                next_state, reward, done = (*step_out, False)
+                            elif len_env_out == 3:
+                                next_state, reward, done = env_out
+                            elif len_env_out == 2:
+                                next_state, reward = env_out
+                                done = False
                             else:
                                 raise RuntimeError('invalid number of items received from environment')
 
@@ -539,17 +561,28 @@ class BlackboxGradientSensing(Module):
 
                 param.grad = -update
 
-                # decay for rmsnorm back to identity
+            # decay for norm gammas back to identity
 
-                if isinstance(param, (nn.RMSNorm, nn.LayerNorm)):
-                    param.data.gamma.lerp_(torch.ones_like(param.gamma), weight_decay)
+            for mod in actor.modules():
+                if isinstance(mod, nn.RMSNorm):
+                    mod.weight.lerp_(torch.ones_like(mod.weight), self.weight_decay)
+
+            # use optimizer to manage step
 
             optim.step()
             optim.zero_grad()
 
-            progress_bar.set_description(join([
+            # progress bar
+
+            learning_updates.set_description(join([
                 f'rewards: {baseline_mean.mean().item():.2f}',
                 f'best: {reward_mean.amax().item():.2f}',
                 f'best delta: {ranked_reward_deltas.amax().item():.2f}',
                 f'accepted: {num_accepted} / {noise_pop_size}'
             ], ' | '))
+
+            # log to experiment tracker
+
+            self.log(
+                rewards = baseline_mean.mean().item()
+            )
