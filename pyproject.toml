@@ -1,6 +1,6 @@
 [project]
 name = "blackbox-gradient-sensing"
-version = "0.0.14"
+version = "0.1.0"
 description = "Blackbox Gradient Sensing"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -25,7 +25,7 @@ dependencies = [
     'accelerate',
     'adam-atan2-pytorch',
     'einops>=0.8.0',
-    'torch>=2.0',
+    'torch>=2.4',
     'tqdm'
 ]
 

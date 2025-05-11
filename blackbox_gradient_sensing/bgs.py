@@ -548,6 +548,7 @@ class BlackboxGradientSensing(Module):
             optim.zero_grad()
 
             progress_bar.set_description(join([
+                f'rewards: {baseline_mean.mean().item():.2f}',
                 f'best: {reward_mean.amax().item():.2f}',
                 f'best delta: {ranked_reward_deltas.amax().item():.2f}',
                 f'accepted: {num_accepted} / {noise_pop_size}'
