@@ -223,10 +223,8 @@ class LatentGenePool(Module):
 
         self.genes = nn.Parameter(l2norm(torch.randn(num_genes, dim)))
 
-    def get_gene(self, gene_id):
-        assert 0 <= idx < self.num_genes
-
-        return l2norm(self.genes[gene_id])
+    def __getitem__(self, idx):
+        return l2norm(self.genes[idx])
 
     @torch.inference_mode()
     def evolve_with_cross_over(
@@ -234,21 +232,21 @@ class LatentGenePool(Module):
         fitnesses,
         temperature = 1.
     ):
-        device = fitnesses.device
+        device, num_selected = fitnesses.device, self.num_selected
         assert fitnesses.ndim == 1 and fitnesses.shape[0] == self.num_genes
 
         sorted_fitness, sorted_gene_ids = fitnesses.sort(dim = -1)
 
-        selected_gene_ids = sorted_gene_ids[-self.num_selected:]
-        selected_fitness = sorted_fitness[-self.num_selected:]
+        selected_gene_ids = sorted_gene_ids[-num_selected:]
+        selected_fitness = sorted_fitness[-num_selected:]
 
-        selected_pool = self.genes[selected_gene_ids]
+        selected_pool = self[selected_gene_ids]
 
         # tournament
 
-        num_children = self.num_genes - self.num_selected
+        num_children = self.num_genes - num_selected
 
-        batch_randperm = torch.randn((num_children, self.num_selected), device = device).argsort(dim = -1)
+        batch_randperm = torch.randn((num_children, num_selected), device = device).argsort(dim = -1)
         tourn_ids = batch_randperm[:, :self.tournament_size]
 
         tourn_fitness_ids = sorted_fitness[tourn_ids]
