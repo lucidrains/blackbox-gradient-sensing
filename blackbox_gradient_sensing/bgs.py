@@ -207,12 +207,20 @@ class LatentGenePool(Module):
     def __init__(
         self,
         dim,
-        num_genes
+        num_genes,
+        num_selected,
+        tournament_size,
     ):
         super().__init__()
-        assert num_genes > 1
+        assert num_genes > 2
 
         self.num_genes = num_genes
+
+        assert 2 <= num_selected < num_genes, f'must select at least 2 genes for mating'
+
+        self.num_selected = num_selected
+        self.tournament_size = tournament_size
+
         self.genes = nn.Parameter(l2norm(torch.randn(num_genes, dim)))
 
     def get_gene(self, gene_id):
@@ -221,12 +229,45 @@ class LatentGenePool(Module):
         return l2norm(self.genes[gene_id])
 
     @torch.inference_mode()
-    def cross_over(
+    def evolve_with_cross_over(
         self,
-        fitnesses
+        fitnesses,
+        temperature = 1.
     ):
+        device = fitnesses.device
         assert fitnesses.ndim == 1 and fitnesses.shape[0] == self.num_genes
-        raise NotImplementedError
+
+        sorted_fitness, sorted_gene_ids = fitnesses.sort(dim = -1)
+
+        selected_gene_ids = sorted_gene_ids[-self.num_selected:]
+        selected_fitness = sorted_fitness[-self.num_selected:]
+
+        selected_pool = self.genes[selected_gene_ids]
+
+        # tournament
+
+        num_children = self.num_genes - self.num_selected
+
+        batch_randperm = torch.randn((num_children, self.num_selected), device = device).argsort(dim = -1)
+        tourn_ids = batch_randperm[:, :self.tournament_size]
+
+        tourn_fitness_ids = sorted_fitness[tourn_ids]
+
+        parent_ids = tourn_fitness_ids.topk(2, dim = -1).indices
+
+        parents = selected_pool[parent_ids]
+
+        # cross over
+
+        parent1, parent2 = parents.unbind(dim = 1)
+
+        children = parent1.lerp(parent2, (torch.randn_like(parent1) / temperature).sigmoid())
+
+        pool = torch.cat((children, selected_pool), dim = 0)
+
+        # next generation
+
+        self.genes.copy_(l2norm(pool))
 
 # main class
 
