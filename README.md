@@ -1,4 +1,4 @@
-## Blackbox Gradient Sensing (wip)
+## Blackbox Gradient Sensing
 
 Implementation and explorations into Blackbox Gradient Sensing (BGS), an evolutionary strategies approach proposed in a [Google Deepmind paper](https://arxiv.org/abs/2207.06572) for Table Tennis
 

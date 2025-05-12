@@ -37,14 +37,19 @@ def test_bgs(
 
     sim = Sim()
 
-    actor = Actor(dim_state = 5, num_actions = 2) # actor with weight norm
+    actor = Actor(
+        dim_state = 5,
+        num_actions = 2,
+        dim_condition = 32,
+        accepts_condition = use_genetic_algorithm
+    ) # actor with weight norm
 
     # test custom actor
 
     if use_custom_actor:
         actor = nn.Linear(5, 2)
 
-        if actor_is_recurrent:
+        if actor_is_recurrent or use_genetic_algorithm:
             pytest.skip()
 
     # maybe state norm

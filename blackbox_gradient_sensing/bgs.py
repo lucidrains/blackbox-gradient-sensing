@@ -281,6 +281,7 @@ class BlackboxGradientSensing(Module):
         state_norm: StateNorm | Module | dict | None  = None,
         actor_is_recurrent = False,
         latent_gene_pool: LatentGenePool | dict | None = None,
+        crossover_every_step = 2,
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
@@ -349,6 +350,8 @@ class BlackboxGradientSensing(Module):
 
         self.gene_pool = gene_pool
         self.num_genes = num_genes
+
+        self.crossover_every_step = crossover_every_step
 
         # optim
 
@@ -546,6 +549,13 @@ class BlackboxGradientSensing(Module):
 
                 gene_index, noise_index = gene_noise_index
 
+                # prepare the latent gene, if needed
+
+                if self.actor_accepts_latents:
+                    latent_gene = self.gene_pool[gene_index]
+
+                # prepare the mutation
+
                 noise = {key: noises_for_param[noise_index] for key, noises_for_param in noises.items()}
 
                 for sign_index, sign in tqdm(enumerate((1, -1)), desc = 'sign', position = 2, leave = False):
@@ -580,6 +590,9 @@ class BlackboxGradientSensing(Module):
                             kwargs = dict()
                             if is_recurrent_actor:
                                 kwargs.update(hiddens = mem)
+
+                            if self.actor_accepts_latents:
+                                kwargs.update(condition = latent_gene)
 
                             actor_out = functional_call(actor, param_with_noise, state, kwargs = kwargs)
 
@@ -648,6 +661,19 @@ class BlackboxGradientSensing(Module):
 
                 for state in episode_states:
                     self.state_norm(state)
+
+            # maybe crossover, if a genetic population is present
+            # the crossover needs to happen before the mutation, as we will discard the mutation contributions from the genes that get selected out.
+
+            if exists(self.gene_pool) and divisible_by(self.step.item(), self.crossover_every_step):
+
+                # only include baseline for now, but could include the mutation rewards for selecting for meta-learning attributes.
+
+                fitnesses = reduce(reward_stats[:, 0], 'g s e -> g', 'mean')
+
+                sel_gene_indices = self.gene_pool.evolve_with_cross_over(fitnesses)
+
+                reward_stats = reward_stats[sel_gene_indices]
 
             # update based on eq (3) and (4) in the paper
             # their contribution is basically to use reward deltas (for a given noise and its negative sign) for sorting for the 'elite' directions
