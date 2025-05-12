@@ -278,10 +278,7 @@ class BlackboxGradientSensing(Module):
         accelerator: Accelerator | None = None,
         state_norm: StateNorm | Module | dict | None  = None,
         actor_is_recurrent = False,
-        dim_gene = None,
-        num_genes = 1,
-        num_selected_genes = 1,
-        actor_is_latent_conditioned = False,
+        latent_gene_pool: LatentGenePool | dict | None = None,
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
@@ -299,7 +296,6 @@ class BlackboxGradientSensing(Module):
         optim_step_post_hook: Callable | None = None,
         post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
-        latent_gene_kwargs: dict = dict(),
         cpu = False,
         torch_compile_actor = True
     ):
@@ -340,12 +336,13 @@ class BlackboxGradientSensing(Module):
 
         # gene pool, another axis for scaling and bitter lesson
 
-        has_gene_pool = num_genes > 1
+        gene_pool = None
 
-        self.has_gene_pool = has_gene_pool
+        if isinstance(latent_gene_pool, dict):
+            gene_pool = LatentGenePool(**latent_gene_pool)
 
-        if has_gene_pool:
-            self.gene_pool = LatentGenePool(dim_gene, num_genes, **latent_gene_kwargs)
+        self.actor_accepts_latents = exists(gene_pool)
+        self.gene_pool = gene_pool
 
         # optim
 

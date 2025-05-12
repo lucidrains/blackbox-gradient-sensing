@@ -20,11 +20,13 @@ class Sim:
 @pytest.mark.parametrize('use_custom_actor', (True, False))
 @pytest.mark.parametrize('use_state_norm', (True, False))
 @pytest.mark.parametrize('actor_is_recurrent', (True, False))
+@pytest.mark.parametrize('use_genetic_algorithm', (True, False))
 def test_bgs(
     factorized_noise,
     use_custom_actor,
     use_state_norm,
-    actor_is_recurrent
+    actor_is_recurrent,
+    use_genetic_algorithm
 ):
 
     sim = Sim()
@@ -46,25 +48,31 @@ def test_bgs(
     if use_state_norm:
         state_norm = dict(dim_state = 5)
 
+    # maybe genetic algorithm
+
+    latent_gene_pool = None
+
+    if use_genetic_algorithm:
+        latent_gene_pool = dict(
+            dim = 32,
+            num_genes = 3,
+            num_selected = 2,
+            tournament_size = 2
+        )
+
     # main evo strat orchestrator
 
     bgs = BlackboxGradientSensing(
         actor = actor,
-        dim_gene = 16,
-        num_genes = 3,
-        num_selected_genes = 2,
         noise_pop_size = 10,      # number of noise perturbations
         num_selected = 2,         # topk noise selected for update
         num_rollout_repeats = 1,   # how many times to redo environment rollout, per noise
-        torch_compile_actor = False,
-        latent_gene_kwargs = dict(
-            num_selected = 2,
-            tournament_size = 2 
-        ),
         cpu = True,
+        torch_compile_actor = False,
         factorized_noise = factorized_noise,
         state_norm = state_norm,
-        actor_is_recurrent = actor_is_recurrent
+        actor_is_recurrent = actor_is_recurrent,
+        latent_gene_pool = latent_gene_pool
     )
 
     bgs(sim, 2) # pass the simulation environment in - say for 100 interactions with env
