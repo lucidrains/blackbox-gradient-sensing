@@ -346,6 +346,8 @@ class BlackboxGradientSensing(Module):
 
         if isinstance(latent_gene_pool, dict):
             gene_pool = LatentGenePool(**latent_gene_pool)
+            gene_pool.to(device)
+
             num_genes = gene_pool.num_genes
 
         self.actor_accepts_latents = exists(gene_pool)
