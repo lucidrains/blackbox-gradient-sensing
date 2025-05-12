@@ -435,6 +435,12 @@ class BlackboxGradientSensing(Module):
 
         self.register_buffer('step', tensor(0))
 
+    def sync_seed_(self):
+        acc = self.accelerator
+        rand_int = torch.randint(0, int(1e7), (), device = acc.device)
+        seed = acc.reduce(rand_int)
+        torch.manual_seed(seed.item())
+
     def log(self, **data):
         return self.accelerator.log(data, step = self.step.item())
 
@@ -524,9 +530,7 @@ class BlackboxGradientSensing(Module):
             # synchronize a global seed
 
             if is_distributed:
-                rand_int = torch.randint(0, int(1e7), (), device = device)
-                seed = acc.reduce(rand_int)
-                torch.manual_seed(seed.item())
+                self.sync_seed_()
 
             # keep track of the rewards received per noise and its negative
 
@@ -698,6 +702,7 @@ class BlackboxGradientSensing(Module):
 
                 fitnesses = self.calc_fitness(reward_stats)
 
+                self.sync_seed_()
                 sel_gene_indices = self.gene_pool.evolve_with_cross_over(fitnesses)
 
                 reward_stats = reward_stats[sel_gene_indices]
