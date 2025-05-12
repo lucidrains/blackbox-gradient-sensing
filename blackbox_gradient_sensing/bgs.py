@@ -321,7 +321,7 @@ class BlackboxGradientSensing(Module):
 
             if cpu:
                 assert 'cpu' not in accelerate_kwargs
-                accelerate_kwargs.update(cpu = True)
+                accelerate_kwargs = {'cpu': True, **accelerate_kwargs}
 
             accelerator = Accelerator(**accelerate_kwargs)
 
