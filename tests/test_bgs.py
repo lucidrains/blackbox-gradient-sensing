@@ -1,7 +1,13 @@
 import pytest
 
+import torch
 from torch import nn
-from blackbox_gradient_sensing.bgs import BlackboxGradientSensing, Actor
+
+from blackbox_gradient_sensing.bgs import (
+    BlackboxGradientSensing,
+    Actor,
+    LatentGenePool
+)
 
 # mock env
 
@@ -82,3 +88,13 @@ def test_bgs(
     bgs.save('./actor-and-state-norm.pt', overwrite = True)
 
     bgs.load('./actor-and-state-norm.pt')
+
+# test genetic algorithm
+
+def test_cross_over():
+    gene_pool = LatentGenePool(dim = 32, num_genes = 3, num_selected = 2, tournament_size = 2)
+
+    fitness = torch.randn(3)
+
+    gene_pool.evolve_with_cross_over(fitness)
+
