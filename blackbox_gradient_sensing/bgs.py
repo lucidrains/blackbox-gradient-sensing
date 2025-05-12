@@ -314,6 +314,7 @@ class BlackboxGradientSensing(Module):
         optim_step_post_hook: Callable | None = None,
         post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
+        threshold_accept_learning_cycle = 2,
         cpu = False,
         torch_compile_actor = True
     ):
@@ -424,6 +425,11 @@ class BlackboxGradientSensing(Module):
         rollouts_for_machine = gene_mutation_indices.chunk(world_size)[rank]
 
         self.register_buffer('rollouts_for_machine', rollouts_for_machine, persistent = False)
+
+        # threshold of valid reward deltas in order to accept weighted mutations
+
+        assert 2 <= threshold_accept_learning_cycle <= noise_pop_size
+        self.threshold_accept_learning_cycle = threshold_accept_learning_cycle
 
         # expose a few computed variables
 
@@ -726,7 +732,7 @@ class BlackboxGradientSensing(Module):
 
             reward_deltas = reward_deltas[accept_mask]
 
-            if reward_deltas.numel() < 2:
+            if reward_deltas.numel() < self.threshold_accept_learning_cycle:
                 continue
 
             num_accepted = accept_mask.sum().item()
