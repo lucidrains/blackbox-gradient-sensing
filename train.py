@@ -15,17 +15,24 @@ num_noises = 100   # number of noise perturbations, from which top is chosen for
 num_selected = 15  # number of elite perturbations chosen
 num_repeats = 5    # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
 
+use_genetic_algorithm = True
+dim_gene = 32
+num_genes = 3
+num_selected = 2
+tournament_size = 2
+
 # instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
 # you can also supply your own Actor, which simply receives a state tensor and outputs action logits
 
 actor = Actor(
     dim_state = dim_state,
-    num_actions = sim.action_space.n
+    num_actions = sim.action_space.n,
+    dim_latent = dim_gene,
+    accepts_latent = use_genetic_algorithm
 )
 
 bgs = BlackboxGradientSensing(
-    actor,
-    dim_state = dim_state,
+    actor,    
     noise_pop_size = num_noises,
     num_selected = num_selected,
     num_rollout_repeats = num_repeats,
@@ -33,9 +40,18 @@ bgs = BlackboxGradientSensing(
     optim_step_post_hook = lambda: actor.norm_weights_(),
     torch_compile_actor = True,
     optim_klass = AdoptAtan2,
+    state_norm = dict(
+        dim_state = dim_state
+    ),
     optim_kwargs = dict(
         cautious_factor = 0.1
-    )
+    ),
+    latent_gene_pool = dict(
+        dim = dim_gene,
+        num_genes = num_genes,
+        num_selected = num_selected,
+        tournament_size = tournament_size
+    ) if use_genetic_algorithm else None
 )
 
 # recording logic

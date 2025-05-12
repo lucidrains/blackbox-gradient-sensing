@@ -40,8 +40,8 @@ def test_bgs(
     actor = Actor(
         dim_state = 5,
         num_actions = 2,
-        dim_condition = 32,
-        accepts_condition = use_genetic_algorithm
+        dim_latent = 32,
+        accepts_latent = use_genetic_algorithm
     ) # actor with weight norm
 
     # test custom actor
@@ -78,13 +78,13 @@ def test_bgs(
         noise_pop_size = 2,      # number of noise perturbations
         num_selected = 1,         # topk noise selected for update
         num_rollout_repeats = 1,   # how many times to redo environment rollout, per noise
-        cpu = True,
         torch_compile_actor = False,
         max_timesteps = 1,
         factorized_noise = factorized_noise,
         state_norm = state_norm,
         actor_is_recurrent = actor_is_recurrent,
-        latent_gene_pool = latent_gene_pool
+        latent_gene_pool = latent_gene_pool,
+        cpu = True,
     )
 
     bgs(sim, 2) # pass the simulation environment in - say for 100 interactions with env
@@ -103,4 +103,3 @@ def test_cross_over():
     fitness = torch.randn(3)
 
     gene_pool.evolve_with_cross_over(fitness)
-

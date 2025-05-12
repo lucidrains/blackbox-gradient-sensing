@@ -136,8 +136,8 @@ class Actor(Module):
         *,
         num_actions,
         hidden_dim = 32,
-        accepts_condition = False,
-        dim_condition = None
+        accepts_latent = False,
+        dim_latent = None
     ):
         super().__init__()
         self.mem_norm = nn.RMSNorm(hidden_dim)
@@ -155,12 +155,12 @@ class Actor(Module):
 
         # for genes -> expression network (the analogy is growing on me)
 
-        self.accepts_condition = accepts_condition
-        if accepts_condition:
-            assert exists(dim_condition)
+        self.accepts_latent = accepts_latent
+        if accepts_latent:
+            assert exists(dim_latent)
 
-            self.encode_condition = nn.Sequential(
-                nn.Linear(dim_condition, hidden_dim),
+            self.encode_latent = nn.Sequential(
+                nn.Linear(dim_latent, hidden_dim),
                 nn.SiLU()
             )
 
@@ -177,9 +177,9 @@ class Actor(Module):
         self,
         x,
         hiddens = None,
-        condition = None
+        latent = None
     ):
-        assert xnor(exists(condition), self.accepts_condition)
+        assert xnor(exists(latent), self.accepts_latent)
 
         x = self.proj_in(x)
         x, forget = x[:-1], x[-1]
@@ -190,8 +190,8 @@ class Actor(Module):
             past_mem = self.mem_norm(hiddens) * forget.sigmoid()
             x = x + past_mem
 
-        if self.accepts_condition:
-            x = x * self.encode_condition(condition)
+        if self.accepts_latent:
+            x = x * self.encode_latent(latent)
 
         x = self.to_embed(x)
         x = F.silu(x)
@@ -282,6 +282,7 @@ class BlackboxGradientSensing(Module):
         actor_is_recurrent = False,
         latent_gene_pool: LatentGenePool | dict | None = None,
         crossover_every_step = 2,
+        crossover_after_step = 0,
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
@@ -356,7 +357,9 @@ class BlackboxGradientSensing(Module):
             return reduce(reward_stats[:, 0], 'g s e -> g', 'mean')
 
         self.calc_fitness = default(calc_fitness, default_calc_fitness)
+
         self.crossover_every_step = crossover_every_step
+        self.crossover_after_step = crossover_after_step
 
         # optim
 
@@ -597,7 +600,7 @@ class BlackboxGradientSensing(Module):
                                 kwargs.update(hiddens = mem)
 
                             if self.actor_accepts_latents:
-                                kwargs.update(condition = latent_gene)
+                                kwargs.update(latent = latent_gene)
 
                             actor_out = functional_call(actor, param_with_noise, state, kwargs = kwargs)
 
@@ -670,7 +673,11 @@ class BlackboxGradientSensing(Module):
             # maybe crossover, if a genetic population is present
             # the crossover needs to happen before the mutation, as we will discard the mutation contributions from the genes that get selected out.
 
-            if exists(self.gene_pool) and divisible_by(self.step.item(), self.crossover_every_step):
+            if (
+                exists(self.gene_pool) and
+                self.step.item() > self.crossover_after_step and
+                divisible_by(self.step.item(), self.crossover_every_step)
+            ):
 
                 # only include baseline for now, but could include the mutation rewards for selecting for meta-learning attributes.
 
