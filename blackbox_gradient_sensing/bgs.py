@@ -210,6 +210,8 @@ class LatentGenePool(Module):
         num_genes,
         num_selected,
         tournament_size,
+        num_elites = 1, # exempt from genetic mutation
+        mutation_std_dev = 0.1,
     ):
         super().__init__()
         assert num_genes > 2
@@ -222,6 +224,9 @@ class LatentGenePool(Module):
         self.tournament_size = tournament_size
 
         self.genes = nn.Parameter(l2norm(torch.randn(num_genes, dim)))
+
+        self.num_elites = num_elites # todo - redo with affinity maturation algorithm from artificial immune system field
+        self.mutation_std_dev = mutation_std_dev
 
     def __getitem__(self, idx):
         return l2norm(self.genes[idx])
@@ -240,7 +245,7 @@ class LatentGenePool(Module):
         selected_gene_ids = sorted_gene_ids[:num_selected]
         selected_fitness = sorted_fitness[:num_selected]
 
-        selected_pool = self[selected_gene_ids]
+        selected_genes = self[selected_gene_ids]
 
         # tournament
 
@@ -253,7 +258,7 @@ class LatentGenePool(Module):
 
         parent_ids = tourn_fitness_ids.topk(2, dim = -1).indices
 
-        parents = selected_pool[parent_ids]
+        parents = selected_genes[parent_ids]
 
         # cross over
 
@@ -261,11 +266,19 @@ class LatentGenePool(Module):
 
         children = parent1.lerp(parent2, (torch.randn_like(parent1) / temperature).sigmoid())
 
-        pool = torch.cat((selected_pool, children), dim = 0)
+        genes = torch.cat((selected_genes, children), dim = 0)
 
-        # next generation
+        # mutate
 
-        self.genes.copy_(l2norm(pool))
+        if self.mutation_std_dev > 0:
+
+            elites, genes = genes[:1], genes[1:]
+
+            genes.add_(torch.randn_like(genes) * self.mutation_std_dev)
+
+            genes = torch.cat((elites, genes), dim = 0)
+
+        self.genes.copy_(l2norm(genes))
 
         return selected_gene_ids # return the selected gene ids, for the outer learning orchestrator to determine which mutations to accept
 
