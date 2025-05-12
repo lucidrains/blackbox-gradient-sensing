@@ -12,15 +12,15 @@ import torch
 from torch import nn, tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
+from torch.optim import Adam
 from torch.func import functional_call
+
 import torch.distributed as dist
 torch.set_float32_matmul_precision('high')
 
 from torch.nn.utils.parametrizations import weight_norm
 
 from einops import reduce, rearrange, einsum, pack, unpack
-
-from adam_atan2_pytorch import AdoptAtan2
 
 from tqdm import tqdm as orig_tqdm
 
@@ -289,19 +289,18 @@ class BlackboxGradientSensing(Module):
         factorized_noise = True,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
-        optim_klass = AdoptAtan2,
+        optim_klass = Adam,
         learning_rate = 8e-2,
         weight_decay = 1e-4,
         betas = (0.9, 0.95),
         max_timesteps = 400,
         param_names: set[str] | None = None,
         show_progress = True,
-        optim_kwargs: dict = dict(
-            cautious_factor = 0.1
-        ),
+        optim_kwargs: dict = dict(),
         optim_step_post_hook: Callable | None = None,
         post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
+        latent_gene_kwargs: dict = dict(),
         cpu = False,
         torch_compile_actor = True
     ):
@@ -347,7 +346,7 @@ class BlackboxGradientSensing(Module):
         self.has_gene_pool = has_gene_pool
 
         if has_gene_pool:
-            self.gene_pool = LatentGenePool(dim_gene, num_genes)
+            self.gene_pool = LatentGenePool(dim_gene, num_genes, **latent_gene_kwargs)
 
         # optim
 
