@@ -465,6 +465,7 @@ class BlackboxGradientSensing(Module):
         pkg = dict(
             actor = self.actor.state_dict(),
             state_norm = self.state_norm.state_dict() if self.use_state_norm else None,
+            latents = self.gene_pool.state_dict() if exists(self.gene_pool) else None,
             step = self.step
         )
 
@@ -478,6 +479,9 @@ class BlackboxGradientSensing(Module):
         pkg = torch.load(str(path), weights_only = True)
 
         self.actor.load_state_dict(pkg['actor'])
+
+        if exists(self.gene_pool):
+            self.gene_pool.load_state_dict(pkg['latents'])
 
         if self.use_state_norm:
             assert 'state_norm' in pkg
