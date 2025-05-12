@@ -382,6 +382,20 @@ class BlackboxGradientSensing(Module):
 
         self.num_env_interactions = num_env_interactions
 
+        # calculate num of episodes per learning cycle for this machine
+
+        world_size, rank = accelerator.num_processes, accelerator.process_index
+
+        noise_indices = torch.arange(noise_pop_size + 1)
+        noises_for_machine = noise_indices.chunk(world_size)[rank]
+        self.register_buffer('noises_for_machine', noises_for_machine, persistent = False)
+    
+        # expose a few computed variables
+
+        self.num_episodes_per_learning_cycle = self.noises_for_machine.shape[0]
+
+        self.is_main = rank == 0
+
         # keep track of number of steps
 
         self.register_buffer('step', tensor(0))
@@ -448,10 +462,8 @@ class BlackboxGradientSensing(Module):
         if self.torch_compile_actor:
             actor = torch.compile(actor)
 
-        is_distributed, world_size, rank, is_main, device = (
+        is_distributed, is_main, device = (
             acc.use_distributed,
-            acc.num_processes,
-            acc.process_index,
             acc.is_main_process,
             acc.device
         )
@@ -474,7 +486,7 @@ class BlackboxGradientSensing(Module):
             # synchronize a global seed
 
             if is_distributed:
-                rand_int = torch.randint(0, int(1e7), (), device = device).item()
+                rand_int = torch.randint(0, int(1e7), (), device = device)
                 seed = acc.reduce(rand_int)
                 torch.manual_seed(seed.item())
 
@@ -509,12 +521,7 @@ class BlackboxGradientSensing(Module):
 
             # maybe shard the interaction with environments for the individual noise perturbations
 
-            noise_indices = torch.arange(pop_size_with_baseline, device = device)
-            noises_for_machine = noise_indices.chunk(world_size)[rank].tolist()
-
-            assert len(noises_for_machine) > 0
-
-            for noise_index in tqdm(noises_for_machine, desc = 'noise index', position = 1, leave = False):
+            for noise_index in tqdm(self.noises_for_machine.tolist(), desc = 'noise index', position = 1, leave = False):
 
                 noise = {key: noises_for_param[noise_index] for key, noises_for_param in noises.items()}
 
