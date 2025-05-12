@@ -9,7 +9,7 @@ from typing import Callable
 import numpy as np
 
 import torch
-from torch import nn, tensor
+from torch import nn, tensor, Tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList, Parameter
 from torch.optim import Adam
@@ -293,6 +293,7 @@ class BlackboxGradientSensing(Module):
         weight_decay = 1e-4,
         betas = (0.9, 0.95),
         max_timesteps = 400,
+        calc_fitness: Callable[[Tensor], Tensor] | None = None,
         param_names: set[str] | None = None,
         show_progress = True,
         optim_kwargs: dict = dict(),
@@ -351,6 +352,10 @@ class BlackboxGradientSensing(Module):
         self.gene_pool = gene_pool
         self.num_genes = num_genes
 
+        def default_calc_fitness(reward_stats):
+            return reduce(reward_stats[:, 0], 'g s e -> g', 'mean')
+
+        self.calc_fitness = default(calc_fitness, default_calc_fitness)
         self.crossover_every_step = crossover_every_step
 
         # optim
@@ -669,7 +674,7 @@ class BlackboxGradientSensing(Module):
 
                 # only include baseline for now, but could include the mutation rewards for selecting for meta-learning attributes.
 
-                fitnesses = reduce(reward_stats[:, 0], 'g s e -> g', 'mean')
+                fitnesses = self.calc_fitness(reward_stats)
 
                 sel_gene_indices = self.gene_pool.evolve_with_cross_over(fitnesses)
 
