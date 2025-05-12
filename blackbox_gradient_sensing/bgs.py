@@ -230,15 +230,15 @@ class LatentGenePool(Module):
     def evolve_with_cross_over(
         self,
         fitnesses,
-        temperature = 1.
+        temperature = 1.5
     ):
         device, num_selected = fitnesses.device, self.num_selected
         assert fitnesses.ndim == 1 and fitnesses.shape[0] == self.num_genes
 
-        sorted_fitness, sorted_gene_ids = fitnesses.sort(dim = -1)
+        sorted_fitness, sorted_gene_ids = fitnesses.sort(dim = -1, descending = True)
 
-        selected_gene_ids = sorted_gene_ids[-num_selected:]
-        selected_fitness = sorted_fitness[-num_selected:]
+        selected_gene_ids = sorted_gene_ids[:num_selected]
+        selected_fitness = sorted_fitness[:num_selected]
 
         selected_pool = self[selected_gene_ids]
 
@@ -261,7 +261,7 @@ class LatentGenePool(Module):
 
         children = parent1.lerp(parent2, (torch.randn_like(parent1) / temperature).sigmoid())
 
-        pool = torch.cat((children, selected_pool), dim = 0)
+        pool = torch.cat((selected_pool, children), dim = 0)
 
         # next generation
 

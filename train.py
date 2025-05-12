@@ -11,14 +11,14 @@ dim_state = sim.observation_space.shape[0]
 
 # hyperparams
 
-num_noises = 100   # number of noise perturbations, from which top is chosen for a weighted update - in paper this was 200 for sim, 3 for real
-num_selected = 15  # number of elite perturbations chosen
-num_repeats = 5    # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
+num_noises = 40     # number of noise perturbations, from which top is chosen for a weighted update - in paper this was 200 for sim, 3 for real
+num_selected = 8    # number of elite perturbations chosen
+num_repeats = 3     # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
 
 use_genetic_algorithm = True
 dim_gene = 32
-num_genes = 3
-num_selected = 2
+num_genes = 6
+num_selected = 4
 tournament_size = 2
 
 # instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
