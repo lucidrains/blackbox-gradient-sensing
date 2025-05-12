@@ -267,6 +267,8 @@ class LatentGenePool(Module):
 
         self.genes.copy_(l2norm(pool))
 
+        return selected_gene_ids # return the selected gene ids, for the outer learning orchestrator to determine which mutations to accept
+
 # main class
 
 class BlackboxGradientSensing(Module):
@@ -336,13 +338,17 @@ class BlackboxGradientSensing(Module):
 
         # gene pool, another axis for scaling and bitter lesson
 
+        num_genes = 1
         gene_pool = None
 
         if isinstance(latent_gene_pool, dict):
             gene_pool = LatentGenePool(**latent_gene_pool)
+            num_genes = gene_pool.num_genes
 
         self.actor_accepts_latents = exists(gene_pool)
+
         self.gene_pool = gene_pool
+        self.num_genes = num_genes
 
         # optim
 
@@ -383,13 +389,19 @@ class BlackboxGradientSensing(Module):
 
         world_size, rank = accelerator.num_processes, accelerator.process_index
 
-        noise_indices = torch.arange(noise_pop_size + 1)
-        noises_for_machine = noise_indices.chunk(world_size)[rank]
-        self.register_buffer('noises_for_machine', noises_for_machine, persistent = False)
-    
+        # for each gene, roll out for each noise candidate
+
+        gene_indices = torch.arange(num_genes)
+        mutation_indices = torch.arange(noise_pop_size + 1)
+
+        gene_mutation_indices = torch.cartesian_prod(gene_indices, mutation_indices)
+        rollouts_for_machine = gene_mutation_indices.chunk(world_size)[rank]
+
+        self.register_buffer('rollouts_for_machine', rollouts_for_machine, persistent = False)
+
         # expose a few computed variables
 
-        self.num_episodes_per_learning_cycle = self.noises_for_machine.shape[0]
+        self.num_episodes_per_learning_cycle = self.rollouts_for_machine.shape[0]
 
         self.is_main = rank == 0
 
@@ -414,7 +426,8 @@ class BlackboxGradientSensing(Module):
 
         pkg = dict(
             actor = self.actor.state_dict(),
-            state_norm = self.state_norm.state_dict() if self.use_state_norm else None
+            state_norm = self.state_norm.state_dict() if self.use_state_norm else None,
+            step = self.step
         )
 
         torch.save(pkg, str(path))
@@ -431,6 +444,8 @@ class BlackboxGradientSensing(Module):
         if self.use_state_norm:
             assert 'state_norm' in pkg
             self.state_norm.load_state_dict(pkg['state_norm'])
+
+        self.step.copy_(pkg['step'])
 
     @torch.inference_mode()
     def forward(
@@ -490,7 +505,16 @@ class BlackboxGradientSensing(Module):
             # keep track of the rewards received per noise and its negative
 
             pop_size_with_baseline = noise_pop_size + 1
-            reward_stats = torch.zeros((pop_size_with_baseline, 2, num_rollout_repeats)).to(device)
+
+            reward_stats = torch.zeros((
+                self.num_genes,           # latent genes for cross over
+                pop_size_with_baseline,   # mutation
+                2,                        # mutation with its anti
+                num_rollout_repeats       # reducing variance with repeat
+            )).to(device)
+
+            # episode seed is shared for one learning cycle
+            # todo - allow for multiple episodes per learning cycle or mutation accumulation
 
             episode_seed = torch.randint(0, int(1e7), ()).item()
 
@@ -518,7 +542,9 @@ class BlackboxGradientSensing(Module):
 
             # maybe shard the interaction with environments for the individual noise perturbations
 
-            for noise_index in tqdm(self.noises_for_machine.tolist(), desc = 'noise index', position = 1, leave = False):
+            for gene_noise_index in tqdm(self.rollouts_for_machine.tolist(), desc = 'noise index', position = 1, leave = False):
+
+                gene_index, noise_index = gene_noise_index
 
                 noise = {key: noises_for_param[noise_index] for key, noises_for_param in noises.items()}
 
@@ -601,7 +627,7 @@ class BlackboxGradientSensing(Module):
 
                             state = next_state
                     
-                        reward_stats[noise_index, sign_index, repeat_index] = total_reward
+                        reward_stats[gene_index, noise_index, sign_index, repeat_index] = total_reward
 
             # maybe synchronize reward stats, as well as min episode length for updating state norm
 
@@ -626,11 +652,11 @@ class BlackboxGradientSensing(Module):
             # update based on eq (3) and (4) in the paper
             # their contribution is basically to use reward deltas (for a given noise and its negative sign) for sorting for the 'elite' directions
 
-            # n - noise, s - sign, e - episode
+            # g - latent / gene, n - noise / mutation, s - sign, e - episode
 
             reward_std = reward_stats.std()
 
-            reward_mean = reduce(reward_stats, 'n s e -> n s', 'mean')
+            reward_mean = reduce(reward_stats, 'g n s e -> n s', 'mean')
 
             baseline_mean, reward_mean = reward_mean[0].mean(), reward_mean[1:]
 

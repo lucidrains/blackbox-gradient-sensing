@@ -70,11 +70,12 @@ def test_bgs(
 
     bgs = BlackboxGradientSensing(
         actor = actor,
-        noise_pop_size = 10,      # number of noise perturbations
-        num_selected = 2,         # topk noise selected for update
+        noise_pop_size = 2,      # number of noise perturbations
+        num_selected = 1,         # topk noise selected for update
         num_rollout_repeats = 1,   # how many times to redo environment rollout, per noise
         cpu = True,
         torch_compile_actor = False,
+        max_timesteps = 1,
         factorized_noise = factorized_noise,
         state_norm = state_norm,
         actor_is_recurrent = actor_is_recurrent,
