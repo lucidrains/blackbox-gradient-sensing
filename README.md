@@ -38,7 +38,6 @@ actor = nn.Linear(5, 2) # contrived network from state of 5 dimension to two act
 
 bgs = BlackboxGradientSensing(
     actor = actor,
-    dim_state = 5,
     noise_pop_size = 10,      # number of noise perturbations
     num_selected = 2,         # topk noise selected for update
     num_rollout_repeats = 1   # how many times to redo environment rollout, per noise

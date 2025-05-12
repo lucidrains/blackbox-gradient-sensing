@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch import nn, tensor
 import torch.nn.functional as F
-from torch.nn import Module, ModuleList
+from torch.nn import Module, ModuleList, Parameter
 from torch.optim import Adam
 from torch.func import functional_call
 
@@ -86,17 +86,17 @@ def maybe_all_reduce_mean(t):
 class StateNorm(Module):
     def __init__(
         self,
-        dim,
+        dim_state,
         eps = 1e-5,
     ):
         # equation (3) in https://arxiv.org/abs/2410.09754
         super().__init__()
-        self.dim = dim
+        self.dim = dim_state
         self.eps = eps
 
         self.register_buffer('step', tensor(1))
-        self.register_buffer('running_mean', torch.zeros(dim))
-        self.register_buffer('running_variance', torch.ones(dim))
+        self.register_buffer('running_mean', torch.zeros(dim_state))
+        self.register_buffer('running_variance', torch.ones(dim_state))
 
     def forward(
         self,
@@ -276,8 +276,7 @@ class BlackboxGradientSensing(Module):
         actor: Module,
         *,
         accelerator: Accelerator | None = None,
-        dim_state = None,
-        use_state_norm = True,
+        state_norm: StateNorm | Module | dict | None  = None,
         actor_is_recurrent = False,
         dim_gene = None,
         num_genes = 1,
@@ -366,12 +365,14 @@ class BlackboxGradientSensing(Module):
 
         # maybe state norm
 
-        self.use_state_norm = use_state_norm
+        if isinstance(state_norm, dict):
+            state_norm = StateNorm(**state_norm)
 
-        if use_state_norm:
-            assert exists(dim_state), f'if using state normalization, must pass in `dim_state`'
-            self.state_norm = StateNorm(dim_state)
-            self.state_norm.to(device)
+        self.use_state_norm = exists(state_norm)
+
+        if self.use_state_norm:
+            self.state_norm = state_norm
+            state_norm.to(device)
 
         # progress bar
 
@@ -526,7 +527,7 @@ class BlackboxGradientSensing(Module):
 
                 for sign_index, sign in tqdm(enumerate((1, -1)), desc = 'sign', position = 2, leave = False):
 
-                    param_with_noise = {name: (noise[name] * sign + param) for name, param in params.items()}
+                    param_with_noise = {name: Parameter(param + noise[name] * sign) for name, param in params.items()}
 
                     for repeat_index in tqdm(range(num_rollout_repeats), desc = 'rollout repeat', position = 3, leave = False):
 
