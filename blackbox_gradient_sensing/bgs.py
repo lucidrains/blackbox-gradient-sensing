@@ -209,7 +209,6 @@ class ActorWrapper(Module):
         *,
         state_norm: StateNorm | None = None,
         latent_gene_pool: LatentGenePool | None = None,
-        is_recurrent = False,
         default_latent_gene_id = 0
     ):
         super().__init__()
@@ -217,7 +216,6 @@ class ActorWrapper(Module):
         self.state_norm = state_norm
         self.latents = latent_gene_pool
 
-        self.is_recurrent = is_recurrent
         self.default_latent_gene_id = default_latent_gene_id
 
     def forward(
@@ -549,7 +547,10 @@ class BlackboxGradientSensing(Module):
 
         self.step.copy_(pkg['step'])
 
-    def return_wrapped_actor(self) -> ActorWrapper:
+    def return_wrapped_actor(self) -> ActorWrapper | Module:
+
+        if not (self.use_state_norm or self.actor_accepts_latents):
+            return self.actor
 
         wrapped_actor = ActorWrapper(
             self.actor,
