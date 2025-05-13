@@ -200,6 +200,53 @@ class Actor(Module):
 
         return self.to_logits(x), x
 
+# an actor wrapper that contains the state normalizer and latent gene pool, defaults to calling the fittest gene
+
+class ActorWrapper(Module):
+    def __init__(
+        self,
+        actor: Module,
+        *,
+        state_norm: StateNorm | None = None,
+        latent_gene_pool: LatentGenePool | None = None,
+        is_recurrent = False,
+        default_latent_gene_id = 0
+    ):
+        super().__init__()
+        self.actor = actor
+        self.state_norm = state_norm
+        self.latents = latent_gene_pool
+
+        self.is_recurrent = is_recurrent
+        self.default_latent_gene_id = default_latent_gene_id
+
+    def forward(
+        self,
+        state,
+        hiddens = None,
+        latent_gene_id = None
+    ):
+        latent_gene_id = default(latent_gene_id, self.default_latent_gene_id)
+
+        if exists(self.state_norm):
+            self.state_norm.eval()
+
+            with torch.no_grad():
+                state = self.state_norm(state)
+
+        latent = None
+
+        if exists(self.latents):
+            latent = self.latents[latent_gene_id]
+
+        out = self.actor(
+            state,
+            hiddens = hiddens,
+            latent = latent
+        )
+
+        return out
+
 # latent gene pool
 
 # proposed by Wang et al. evolutionary policy optimization (EPO)
@@ -501,6 +548,16 @@ class BlackboxGradientSensing(Module):
             self.state_norm.load_state_dict(pkg['state_norm'])
 
         self.step.copy_(pkg['step'])
+
+    def return_wrapped_actor(self) -> ActorWrapper:
+
+        wrapped_actor = ActorWrapper(
+            self.actor,
+            state_norm = self.state_norm if self.use_state_norm else None,
+            latent_gene_pool = self.gene_pool if self.actor_accepts_latents else None,
+        )
+
+        return wrapped_actor
 
     @torch.inference_mode()
     def forward(
