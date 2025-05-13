@@ -27,12 +27,14 @@ class Sim:
 @pytest.mark.parametrize('use_state_norm', (True, False))
 @pytest.mark.parametrize('actor_is_recurrent', (True, False))
 @pytest.mark.parametrize('use_genetic_algorithm', (True, False))
+@pytest.mark.parametrize('use_ema', (True, False))
 def test_bgs(
     factorized_noise,
     use_custom_actor,
     use_state_norm,
     actor_is_recurrent,
-    use_genetic_algorithm
+    use_genetic_algorithm,
+    use_ema
 ):
 
     sim = Sim()
@@ -85,6 +87,7 @@ def test_bgs(
         actor_is_recurrent = actor_is_recurrent,
         latent_gene_pool = latent_gene_pool,
         cpu = True,
+        use_ema = use_ema
     )
 
     bgs(sim, 2) # pass the simulation environment in - say for 100 interactions with env

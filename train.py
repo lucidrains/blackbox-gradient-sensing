@@ -15,7 +15,7 @@ num_noises = 40     # number of noise perturbations, from which top is chosen fo
 num_selected = 8    # number of elite perturbations chosen
 num_repeats = 3     # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
 
-use_genetic_algorithm = True
+use_genetic_algorithm = False
 dim_gene = 32
 num_genes = 6
 num_selected = 4
@@ -37,6 +37,7 @@ bgs = BlackboxGradientSensing(
     num_selected = num_selected,
     num_rollout_repeats = num_repeats,
     actor_is_recurrent = True,
+    use_ema = True,
     optim_step_post_hook = lambda: actor.norm_weights_(),
     torch_compile_actor = True,
     optim_klass = AdoptAtan2,

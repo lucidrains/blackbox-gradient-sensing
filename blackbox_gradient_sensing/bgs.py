@@ -22,6 +22,8 @@ from torch.nn.utils.parametrizations import weight_norm
 
 from einops import reduce, rearrange, einsum, pack, unpack
 
+from ema_pytorch import EMA
+
 from tqdm import tqdm as orig_tqdm
 
 from accelerate import Accelerator
@@ -316,7 +318,10 @@ class BlackboxGradientSensing(Module):
         accelerate_kwargs: dict = dict(),
         threshold_accept_learning_cycle = 2,
         cpu = False,
-        torch_compile_actor = True
+        torch_compile_actor = True,
+        use_ema = False,
+        ema_decay = 0.95,
+        update_model_with_ema_every = 100
     ):
         super().__init__()
         assert num_selected < noise_pop_size, f'number of selected noise must be less than the total population of noise'
@@ -345,6 +350,9 @@ class BlackboxGradientSensing(Module):
         # net
 
         self.actor = actor.to(device)
+
+        self.use_ema = use_ema
+        self.ema_actor = EMA(actor, beta = ema_decay, update_model_with_ema_every = update_model_with_ema_every, include_online_model = False) if use_ema else None
 
         self.torch_compile_actor = torch_compile_actor
 
@@ -464,6 +472,7 @@ class BlackboxGradientSensing(Module):
 
         pkg = dict(
             actor = self.actor.state_dict(),
+            ema_actor = self.ema_actor.state_dict() if self.use_ema else None,
             state_norm = self.state_norm.state_dict() if self.use_state_norm else None,
             latents = self.gene_pool.state_dict() if exists(self.gene_pool) else None,
             step = self.step
@@ -482,6 +491,10 @@ class BlackboxGradientSensing(Module):
 
         if exists(self.gene_pool):
             self.gene_pool.load_state_dict(pkg['latents'])
+
+        if self.use_ema:
+            assert 'ema_actor' in pkg
+            self.ema_actor.load_state_dict(pkg['ema_actor'])
 
         if self.use_state_norm:
             assert 'state_norm' in pkg
@@ -509,7 +522,9 @@ class BlackboxGradientSensing(Module):
             noise_std_dev
         ) = self.num_selected, self.noise_pop_size, self.num_rollout_repeats, self.factorized_noise, self.noise_std_dev
 
-        acc, optim, actor = self.accelerator, self.optim, self.actor
+        acc, optim = self.accelerator, self.optim
+
+        actor = self.actor if not self.use_ema else self.ema_actor.ema_model
 
         is_recurrent_actor = self.actor_is_recurrent
 
@@ -777,6 +792,11 @@ class BlackboxGradientSensing(Module):
 
             optim.step()
             optim.zero_grad()
+
+            # maybe ema
+
+            if self.use_ema:
+                self.ema_actor.update()
 
             # progress bar
 
