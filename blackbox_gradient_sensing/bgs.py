@@ -355,7 +355,8 @@ class BlackboxGradientSensing(Module):
         betas = (0.9, 0.95),
         max_timesteps = 400,
         calc_fitness: Callable[[Tensor], Tensor] | None = None,
-        param_names: set[str] | None = None,
+        param_names: set[str] | str | None = None,
+        modules_to_optimize: set[str] | str | None = None,
         show_progress = True,
         optim_kwargs: dict = dict(),
         optim_step_post_hook: Callable | None = None,
@@ -404,7 +405,36 @@ class BlackboxGradientSensing(Module):
         self.actor_is_recurrent = actor_is_recurrent # if set to True, actor must pass out the memory on forward on the second position, then receive it as a kwarg of `hiddens`
 
         named_params = dict(actor.named_parameters())
-        self.param_names = default(param_names, set(named_params.keys()))
+        named_modules = dict(actor.named_modules())
+
+        # handle only a subset of parameters being optimized
+
+        if isinstance(param_names, str):
+            param_names = {param_names}
+
+        # also handle if module names are passed in
+        # ex. optimizing some gating / routing neural network that ties together a bunch of other pretrained policies
+
+        if isinstance(modules_to_optimize, str):
+            modules_to_optimize = {modules_to_optimize}
+
+        if exists(modules_to_optimize):
+            param_names = default(param_names, set())
+
+            for module_name in modules_to_optimize:
+                module = named_modules[module_name]
+                module_param_names = dict(module.named_parameters()).keys()
+                module_param_names_with_prefix = [f'{module_name}.{param_name}' for param_name in module_param_names]
+
+                param_names |= set(module_param_names_with_prefix)
+
+        param_names = default(param_names, set(named_params.keys()))
+
+        # validate and set parameters to optimize
+
+        assert len(param_names) > 0, f'no parameters to optimize with evolutionary strategy'
+
+        self.param_names = param_names
 
         # gene pool, another axis for scaling and bitter lesson
 
