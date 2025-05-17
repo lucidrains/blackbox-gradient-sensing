@@ -20,7 +20,8 @@ torch.set_float32_matmul_precision('high')
 
 from torch.nn.utils.parametrizations import weight_norm
 
-from einops import reduce, rearrange, einsum, pack, unpack
+from einops import reduce, repeat, rearrange, einsum, pack, unpack
+from einops.layers.torch import Rearrange
 
 from ema_pytorch import EMA
 
@@ -47,6 +48,14 @@ def join(arr, delimiter):
 
 def is_empty(t):
     return t.numel() == 0
+
+def arange_like(t, *, dim = None, length = None):
+    assert exists(dim) or exists(length)
+
+    if not exists(length):
+        length = t.shape[dim]
+
+    return torch.arange(length, device = t.device)
 
 def log(t, eps = 1e-20):
     return t.clamp(min = eps).log()
@@ -254,23 +263,33 @@ class LatentGenePool(Module):
     def __init__(
         self,
         dim,
-        num_genes,
+        num_genes_per_island,
         num_selected,
         tournament_size,
         num_elites = 1, # exempt from genetic mutation
         mutation_std_dev = 0.1,
+        num_islands = 1
     ):
         super().__init__()
-        assert num_genes > 2
+        assert num_islands >= 1
+        assert num_genes_per_island > 2
 
+        self.num_islands = num_islands
+
+        num_genes = num_genes_per_island * num_islands
         self.num_genes = num_genes
 
-        assert 2 <= num_selected < num_genes, f'must select at least 2 genes for mating'
+        assert 2 <= num_selected < num_genes_per_island, f'must select at least 2 genes for mating'
 
         self.num_selected = num_selected
+        self.num_children = num_genes_per_island - num_selected
         self.tournament_size = tournament_size
 
+        self.dim_gene = dim
         self.genes = nn.Parameter(l2norm(torch.randn(num_genes, dim)))
+
+        self.split_islands = Rearrange('(i g) ... -> i g ...', i = num_islands)
+        self.merge_islands = Rearrange('i g ... -> (i g) ...')
 
         self.num_elites = num_elites # todo - redo with affinity maturation algorithm from artificial immune system field
         self.mutation_std_dev = mutation_std_dev
@@ -287,43 +306,64 @@ class LatentGenePool(Module):
         device, num_selected = fitnesses.device, self.num_selected
         assert fitnesses.ndim == 1 and fitnesses.shape[0] == self.num_genes
 
+        # split out the islands
+
+        genes = self.genes
+        num_islands = self.num_islands
+
+        fitnesses = self.split_islands(fitnesses)
+        genes = self.split_islands(genes)
+
+        # local competition within each island
+
         sorted_fitness, sorted_gene_ids = fitnesses.sort(dim = -1, descending = True)
 
-        selected_gene_ids = sorted_gene_ids[:num_selected]
-        selected_fitness = sorted_fitness[:num_selected]
+        selected_gene_ids = sorted_gene_ids[:, :num_selected]
+        selected_fitness = sorted_fitness[:, :num_selected]
 
-        selected_genes = self[selected_gene_ids]
+        selected_gene_ids_for_gather = repeat(selected_gene_ids, '... -> ... d', d = self.dim_gene)
+
+        selected_genes = genes.gather(1, selected_gene_ids_for_gather)
 
         # tournament
 
-        num_children = self.num_genes - num_selected
+        num_children = self.num_children
 
-        batch_randperm = torch.randn((num_children, num_selected), device = device).argsort(dim = -1)
-        tourn_ids = batch_randperm[:, :self.tournament_size]
+        batch_randperm = torch.randn((num_islands, num_children, num_selected), device = device).argsort(dim = -1)
+        tourn_ids = batch_randperm[..., :self.tournament_size]
 
-        tourn_fitness_ids = sorted_fitness[tourn_ids]
+        sorted_fitness = repeat(sorted_fitness, '... -> ... d', d = tourn_ids.shape[-1])
+
+        tourn_fitness_ids = sorted_fitness.gather(1, tourn_ids)
 
         parent_ids = tourn_fitness_ids.topk(2, dim = -1).indices
 
-        parents = selected_genes[parent_ids]
+        parent_ids = rearrange(parent_ids, 'i g parents -> i (g parents)')
+
+        parent_ids = repeat(parent_ids, '... -> ... d', d = self.dim_gene)
+
+        parents = selected_genes.gather(1, parent_ids)
+        parents = rearrange(parents, 'i (g parents) d -> parents i g d', parents = 2)
 
         # cross over
 
-        parent1, parent2 = parents.unbind(dim = 1)
+        parent1, parent2 = parents
 
         children = parent1.lerp(parent2, (torch.randn_like(parent1) / temperature).sigmoid())
 
-        genes = torch.cat((selected_genes, children), dim = 0)
+        genes = torch.cat((selected_genes, children), dim = 1)
 
         # mutate
 
         if self.mutation_std_dev > 0:
 
-            elites, genes = genes[:1], genes[1:]
+            elites, genes = genes[:, :1], genes[:, 1:]
 
             genes.add_(torch.randn_like(genes) * self.mutation_std_dev)
 
-            genes = torch.cat((elites, genes), dim = 0)
+            genes = torch.cat((elites, genes), dim = 1)
+
+        genes = self.merge_islands(genes)
 
         self.genes.copy_(l2norm(genes))
 
@@ -341,7 +381,7 @@ class BlackboxGradientSensing(Module):
         state_norm: StateNorm | Module | dict | None  = None,
         actor_is_recurrent = False,
         latent_gene_pool: LatentGenePool | dict | None = None,
-        crossover_every_step = 2,
+        crossover_every_step = 1,
         crossover_after_step = 0,
         num_env_interactions = 1000,
         noise_pop_size = 40,
@@ -818,7 +858,13 @@ class BlackboxGradientSensing(Module):
                 self.sync_seed_()
                 sel_gene_indices = self.gene_pool.evolve_with_cross_over(fitnesses)
 
-                reward_stats = reward_stats[sel_gene_indices]
+                reward_stats = self.gene_pool.split_islands(reward_stats)
+
+                islands_arange = arange_like(sel_gene_indices, dim = 0)
+
+                reward_stats = reward_stats[islands_arange[:, None], sel_gene_indices]
+
+                reward_stats = self.gene_pool.merge_islands(reward_stats)
 
             # update based on eq (3) and (4) in the paper
             # their contribution is basically to use reward deltas (for a given noise and its negative sign) for sorting for the 'elite' directions

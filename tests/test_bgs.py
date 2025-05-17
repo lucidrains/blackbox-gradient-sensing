@@ -27,6 +27,7 @@ class Sim:
 @pytest.mark.parametrize('use_state_norm', (True, False))
 @pytest.mark.parametrize('actor_is_recurrent', (True, False))
 @pytest.mark.parametrize('use_genetic_algorithm', (True, False))
+@pytest.mark.parametrize('num_islands', (1, 2))
 @pytest.mark.parametrize('use_ema', (True, False))
 def test_bgs(
     factorized_noise,
@@ -34,6 +35,7 @@ def test_bgs(
     use_state_norm,
     actor_is_recurrent,
     use_genetic_algorithm,
+    num_islands,
     use_ema
 ):
 
@@ -68,7 +70,8 @@ def test_bgs(
     if use_genetic_algorithm:
         latent_gene_pool = dict(
             dim = 32,
-            num_genes = 3,
+            num_genes_per_island = 3,
+            num_islands = num_islands,
             num_selected = 2,
             tournament_size = 2
         )
@@ -100,9 +103,18 @@ def test_bgs(
 
 # test genetic algorithm
 
-def test_cross_over():
-    gene_pool = LatentGenePool(dim = 32, num_genes = 3, num_selected = 2, tournament_size = 2)
+@pytest.mark.parametrize('num_islands', (1, 4))
+def test_cross_over(
+    num_islands
+):
+    gene_pool = LatentGenePool(
+        dim = 32,
+        num_genes_per_island = 3,
+        num_islands = num_islands,
+        num_selected = 2,
+        tournament_size = 2
+    )
 
-    fitness = torch.randn(3)
+    fitness = torch.randn(3 * num_islands)
 
     gene_pool.evolve_with_cross_over(fitness)
