@@ -420,7 +420,7 @@ class BlackboxGradientSensing(Module):
         crossover_after_step = 0,
         num_env_interactions = 1000,
         noise_pop_size = 40,
-        noise_std_dev = 0.1, # Appendix F in paper, appears to be constant for sim and real
+        noise_std_dev: dict[str, float] | float = 0.1, # Appendix F in paper, appears to be constant for sim and real
         factorized_noise = True,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
@@ -451,7 +451,6 @@ class BlackboxGradientSensing(Module):
 
         self.num_selected = num_selected
         self.noise_pop_size = noise_pop_size
-        self.noise_std_dev = noise_std_dev
         self.num_rollout_repeats = num_rollout_repeats
         self.factorized_noise = factorized_noise # maybe factorized gaussian noise
 
@@ -510,6 +509,13 @@ class BlackboxGradientSensing(Module):
         assert len(param_names) > 0, f'no parameters to optimize with evolutionary strategy'
 
         self.param_names = param_names
+
+        # noise std deviations, which can be one fixed value, or tailored to specific value per parameter name
+
+        if isinstance(noise_std_dev, float):
+            noise_std_dev = {name: noise_std_dev for name in self.param_names}
+
+        self.noise_std_dev = noise_std_dev
 
         # gene pool, another axis for scaling and bitter lesson
 
@@ -745,6 +751,8 @@ class BlackboxGradientSensing(Module):
 
             for key, param in params.items():
 
+                param_noise_std_dev = noise_std_dev[key]
+
                 if factorized_noise and param.ndim == 2:
                     i, j = param.shape
 
@@ -758,7 +766,7 @@ class BlackboxGradientSensing(Module):
 
                 noises_for_param[0].zero_() # first is for baseline
 
-                noises[key] = noises_for_param * noise_std_dev
+                noises[key] = noises_for_param * param_noise_std_dev
 
             # maybe shard the interaction with environments for the individual noise perturbations
 
