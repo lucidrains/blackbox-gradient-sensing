@@ -202,6 +202,7 @@ class Actor(Module):
             x = x + past_mem
 
         if self.accepts_latent:
+            latent = l2norm(latent) # could be noised
             x = x * self.encode_latent(latent)
 
         x = self.to_embed(x)
@@ -421,6 +422,8 @@ class BlackboxGradientSensing(Module):
         num_env_interactions = 1000,
         noise_pop_size = 40,
         noise_std_dev: dict[str, float] | float = 0.1, # Appendix F in paper, appears to be constant for sim and real
+        mutate_latent_genes = False,
+        latent_gene_noise_std_dev = 1e-4,
         factorized_noise = True,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
@@ -542,6 +545,13 @@ class BlackboxGradientSensing(Module):
         self.crossover_after_step = crossover_after_step
 
         self.genetic_migration_every = genetic_migration_every
+
+        # whether to do heritable mutations to the latent genes
+
+        assert not (mutate_latent_genes and not exists(self.gene_pool))
+        self.mutate_latent_genes = mutate_latent_genes
+
+        self.noise_std_dev['.gene_pool'] = latent_gene_noise_std_dev
 
         # optim
 
@@ -716,6 +726,13 @@ class BlackboxGradientSensing(Module):
         # params
 
         params = dict(self.actor.named_parameters())
+
+        # add the latents to the params if mutating them
+
+        if self.mutate_latent_genes:
+            params['.gene_pool'] = self.gene_pool.genes
+
+        # outer learning update progress bar
 
         learning_updates = tqdm(range(num_env_interactions), position = 0)
 
