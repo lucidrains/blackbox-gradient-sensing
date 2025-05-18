@@ -782,7 +782,10 @@ class BlackboxGradientSensing(Module):
             # determine noise for latents
 
             if self.mutate_latent_genes and self.actor_accepts_latents:
-                latent_gene_noises = torch.randn_like(self.gene_pool.genes) * self.latent_gene_noise_std_dev
+                genes_shape = self.gene_pool.genes.shape
+                all_latent_noises = torch.randn((pop_size_with_baseline, *genes_shape), device = device) * self.latent_gene_noise_std_dev
+
+                all_latent_noises[0].zero_() # first for baseline
 
             # maybe shard the interaction with environments for the individual noise perturbations
 
@@ -796,8 +799,7 @@ class BlackboxGradientSensing(Module):
                     latent_gene = self.gene_pool[gene_index]
 
                     if self.mutate_latent_genes:
-                        latent_gene_noise = latent_gene_noises[gene_index]
-                        latent_gene = latent_gene + latent_gene_noise
+                        latent_gene_noises = all_latent_noises[:, gene_index]
 
                 # prepare the mutation
 
@@ -837,6 +839,12 @@ class BlackboxGradientSensing(Module):
                                 kwargs.update(hiddens = mem)
 
                             if self.actor_accepts_latents:
+
+                                if self.mutate_latent_genes:
+                                    latent_gene_noise = latent_gene_noises[noise_index] * sign
+
+                                    latent_gene = latent_gene + latent_gene_noise
+
                                 kwargs.update(latent = latent_gene)
 
                             actor_out = functional_call(actor, param_with_noise, state, kwargs = kwargs)
@@ -994,6 +1002,17 @@ class BlackboxGradientSensing(Module):
             for mod in actor.modules():
                 if isinstance(mod, nn.RMSNorm):
                     mod.weight.lerp_(torch.ones_like(mod.weight), self.weight_decay)
+
+            # update latents if needed
+
+            if self.actor_accepts_latents and self.mutate_latent_genes:
+                genes = self.gene_pool.genes
+
+                best_latent_noises = all_latent_noises[1:][accept_mask][ranked_reward_indices]
+
+                update = einsum(best_latent_noises, weights, 'n ..., n -> ...')
+
+                genes.add_(update)
 
             # use optimizer to manage step
 
