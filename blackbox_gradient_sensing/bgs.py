@@ -548,10 +548,9 @@ class BlackboxGradientSensing(Module):
 
         # whether to do heritable mutations to the latent genes
 
-        assert not (mutate_latent_genes and not exists(self.gene_pool))
         self.mutate_latent_genes = mutate_latent_genes
 
-        self.noise_std_dev['.gene_pool'] = latent_gene_noise_std_dev
+        self.latent_gene_noise_std_dev = latent_gene_noise_std_dev
 
         # optim
 
@@ -727,11 +726,6 @@ class BlackboxGradientSensing(Module):
 
         params = dict(self.actor.named_parameters())
 
-        # add the latents to the params if mutating them
-
-        if self.mutate_latent_genes:
-            params['.gene_pool'] = self.gene_pool.genes
-
         # outer learning update progress bar
 
         learning_updates = tqdm(range(num_env_interactions), position = 0)
@@ -785,6 +779,11 @@ class BlackboxGradientSensing(Module):
 
                 noises[key] = noises_for_param * param_noise_std_dev
 
+            # determine noise for latents
+
+            if self.mutate_latent_genes and self.actor_accepts_latents:
+                latent_gene_noises = torch.randn_like(self.gene_pool.genes) * self.latent_gene_noise_std_dev
+
             # maybe shard the interaction with environments for the individual noise perturbations
 
             for gene_noise_index in tqdm(self.rollouts_for_machine.tolist(), desc = 'noise index', position = 1, leave = False):
@@ -795,6 +794,10 @@ class BlackboxGradientSensing(Module):
 
                 if self.actor_accepts_latents:
                     latent_gene = self.gene_pool[gene_index]
+
+                    if self.mutate_latent_genes:
+                        latent_gene_noise = latent_gene_noises[gene_index]
+                        latent_gene = latent_gene + latent_gene_noise
 
                 # prepare the mutation
 

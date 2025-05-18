@@ -30,6 +30,7 @@ class Sim:
 @pytest.mark.parametrize('actor_is_recurrent', (True, False))
 @pytest.mark.parametrize('use_genetic_algorithm', (True, False))
 @pytest.mark.parametrize('num_islands', (1, 2))
+@pytest.mark.parametrize('mutate_latent_genes', (True, False))
 @pytest.mark.parametrize('use_ema', (True, False))
 def test_bgs(
     factorized_noise,
@@ -38,6 +39,7 @@ def test_bgs(
     actor_is_recurrent,
     use_genetic_algorithm,
     num_islands,
+    mutate_latent_genes,
     use_ema
 ):
 
@@ -87,6 +89,7 @@ def test_bgs(
         num_rollout_repeats = 1,   # how many times to redo environment rollout, per noise
         torch_compile_actor = False,
         max_timesteps = 1,
+        mutate_latent_genes = mutate_latent_genes,
         factorized_noise = factorized_noise,
         state_norm = state_norm,
         actor_is_recurrent = actor_is_recurrent,
