@@ -556,6 +556,9 @@ class BlackboxGradientSensing(Module):
 
         optim_params = [named_params[param_name] for param_name in self.param_names]
 
+        if self.actor_accepts_latents and self.mutate_latent_genes:
+            optim_params.append(gene_pool.genes)
+
         self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas)
 
         self.weight_decay = weight_decay
@@ -985,6 +988,16 @@ class BlackboxGradientSensing(Module):
 
             weights *= torch.sign(reward_deltas[ranked_reward_indices]
     )
+            # update latents if needed
+
+            params_for_update, noises_for_update = list(params.values()), list(noises.values())
+
+            if self.actor_accepts_latents and self.mutate_latent_genes:
+                genes = self.gene_pool.genes
+
+                params_for_update.append(genes)
+                noises_for_update.append(all_latent_noises)
+
             # update the param one by one
 
             for param, noise in zip(params.values(), noises.values()):
@@ -1002,17 +1015,6 @@ class BlackboxGradientSensing(Module):
             for mod in actor.modules():
                 if isinstance(mod, nn.RMSNorm):
                     mod.weight.lerp_(torch.ones_like(mod.weight), self.weight_decay)
-
-            # update latents if needed
-
-            if self.actor_accepts_latents and self.mutate_latent_genes:
-                genes = self.gene_pool.genes
-
-                best_latent_noises = all_latent_noises[1:][accept_mask][ranked_reward_indices]
-
-                update = einsum(best_latent_noises, weights, 'n ..., n -> ...')
-
-                genes.add_(update)
 
             # use optimizer to manage step
 
