@@ -765,6 +765,9 @@ class BlackboxGradientSensing(Module):
 
             for key, param in params.items():
 
+                if key not in self.param_names:
+                    continue
+
                 param_noise_std_dev = noise_std_dev[key]
 
                 if factorized_noise and param.ndim == 2:
@@ -810,7 +813,7 @@ class BlackboxGradientSensing(Module):
 
                 for sign_index, sign in tqdm(enumerate((1, -1)), desc = 'sign', position = 2, leave = False):
 
-                    param_with_noise = {name: Parameter(param + noise[name] * sign) for name, param in params.items()}
+                    param_with_noise = {name: Parameter(param + noise[name] * sign) if name in self.param_names else param for name, param in params.items()}
 
                     for repeat_index in tqdm(range(num_rollout_repeats), desc = 'rollout repeat', position = 3, leave = False):
 
@@ -990,17 +993,15 @@ class BlackboxGradientSensing(Module):
     )
             # update latents if needed
 
-            params_for_update, noises_for_update = list(params.values()), list(noises.values())
-
             if self.actor_accepts_latents and self.mutate_latent_genes:
-                genes = self.gene_pool.genes
-
-                params_for_update.append(genes)
-                noises_for_update.append(all_latent_noises)
+                noises['.gene_pool'] = all_latent_noises
+                params['.gene_pool'] = self.gene_pool.genes
 
             # update the param one by one
 
-            for param, noise in zip(params.values(), noises.values()):
+            for name, noise in noises.items():
+
+                param = params[name]
 
                 # add the best "elite" noise directions weighted by eq (3)
 
