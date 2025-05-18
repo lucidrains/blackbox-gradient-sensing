@@ -9,7 +9,7 @@ from typing import Callable
 import numpy as np
 
 import torch
-from torch import nn, tensor, Tensor
+from torch import cat, nn, tensor, Tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList, Parameter
 from torch.optim import Adam
@@ -268,7 +268,8 @@ class LatentGenePool(Module):
         tournament_size,
         num_elites = 1, # exempt from genetic mutation
         mutation_std_dev = 0.1,
-        num_islands = 1
+        num_islands = 1,
+        num_frac_migrate = 0.1 # migrate 10 percent of the bottom population
     ):
         super().__init__()
         assert num_islands >= 1
@@ -278,6 +279,7 @@ class LatentGenePool(Module):
 
         num_genes = num_genes_per_island * num_islands
         self.num_genes = num_genes
+        self.num_genes_per_island = num_genes_per_island
 
         assert 2 <= num_selected < num_genes_per_island, f'must select at least 2 genes for mating'
 
@@ -294,8 +296,36 @@ class LatentGenePool(Module):
         self.num_elites = num_elites # todo - redo with affinity maturation algorithm from artificial immune system field
         self.mutation_std_dev = mutation_std_dev
 
+        assert 0. <= num_frac_migrate <= 1.
+
+        self.num_frac_migrate = num_frac_migrate
+
     def __getitem__(self, idx):
         return l2norm(self.genes[idx])
+
+    @torch.inference_mode()
+    def migrate(
+        self,
+        genes = None
+    ):
+        if self.num_frac_migrate == 0. or self.num_islands == 1:
+            return
+
+        num_migrate = max(1, int(self.num_frac_migrate * self.num_genes_per_island))
+
+        genes = default(genes, self.genes)
+
+        genes = self.split_islands(genes)
+
+        # fixed migration pattern - what i observe to work best, for now
+
+        genes, migrants = genes[:, -num_migrate:], genes[:, :-num_migrate]
+
+        migrants = torch.roll(migrants, 1, dims = (1,))
+
+        genes = cat((genes, migrants), dim = 1)
+
+        self.genes.copy_(self.merge_islands(genes))
 
     @torch.inference_mode()
     def evolve_with_cross_over(
@@ -355,13 +385,17 @@ class LatentGenePool(Module):
 
         # mutate
 
+        has_elites = self.num_elites > 0
+
         if self.mutation_std_dev > 0:
 
-            elites, genes = genes[:, :1], genes[:, 1:]
+            if has_elites:
+                elites, genes = genes[:, :1], genes[:, 1:]
 
             genes.add_(torch.randn_like(genes) * self.mutation_std_dev)
 
-            genes = torch.cat((elites, genes), dim = 1)
+            if has_elites:
+                genes = torch.cat((elites, genes), dim = 1)
 
         genes = self.merge_islands(genes)
 
@@ -381,6 +415,7 @@ class BlackboxGradientSensing(Module):
         state_norm: StateNorm | Module | dict | None  = None,
         actor_is_recurrent = False,
         latent_gene_pool: LatentGenePool | dict | None = None,
+        genetic_migration_every = 100,
         crossover_every_step = 1,
         crossover_after_step = 0,
         num_env_interactions = 1000,
@@ -499,6 +534,8 @@ class BlackboxGradientSensing(Module):
 
         self.crossover_every_step = crossover_every_step
         self.crossover_after_step = crossover_after_step
+
+        self.genetic_migration_every = genetic_migration_every
 
         # optim
 
@@ -841,6 +878,14 @@ class BlackboxGradientSensing(Module):
 
                 for state in episode_states:
                     self.state_norm(state)
+
+            # maybe migration for genes
+
+            if (
+                exists(self.gene_pool) and
+                divisible_by(self.step.item(), self.genetic_migration_every)
+            ):
+                self.gene_pool.migrate()
 
             # maybe crossover, if a genetic population is present
             # the crossover needs to happen before the mutation, as we will discard the mutation contributions from the genes that get selected out.

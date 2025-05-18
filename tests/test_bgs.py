@@ -91,6 +91,7 @@ def test_bgs(
         state_norm = state_norm,
         actor_is_recurrent = actor_is_recurrent,
         latent_gene_pool = latent_gene_pool,
+        genetic_migration_every = 1,
         cpu = True,
         use_ema = use_ema
     )
