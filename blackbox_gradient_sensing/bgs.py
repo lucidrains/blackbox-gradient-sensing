@@ -440,6 +440,7 @@ class BlackboxGradientSensing(Module):
         optim_step_post_hook: Callable | None = None,
         post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
+        num_std_below_mean_thres_accept = 0.5,
         threshold_accept_learning_cycle = 2,
         cpu = False,
         torch_compile_actor = True,
@@ -608,6 +609,10 @@ class BlackboxGradientSensing(Module):
 
         assert 2 <= threshold_accept_learning_cycle <= noise_pop_size
         self.threshold_accept_learning_cycle = threshold_accept_learning_cycle
+
+        # for each reward and its anti, the number of standard deviations below the baseline they can be for acceptance
+
+        self.num_std_below_mean_thres_accept = num_std_below_mean_thres_accept
 
         # expose a few computed variables
 
@@ -921,14 +926,6 @@ class BlackboxGradientSensing(Module):
                 for state in episode_states:
                     self.state_norm(state)
 
-            # maybe migration for genes
-
-            if (
-                exists(self.gene_pool) and
-                divisible_by(self.step.item(), self.genetic_migration_every)
-            ):
-                self.gene_pool.migrate()
-
             # maybe crossover, if a genetic population is present
             # the crossover needs to happen before the mutation, as we will discard the mutation contributions from the genes that get selected out.
 
@@ -953,6 +950,14 @@ class BlackboxGradientSensing(Module):
 
                 reward_stats = self.gene_pool.merge_islands(reward_stats)
 
+            # maybe migration for genes
+
+            if (
+                exists(self.gene_pool) and
+                divisible_by(self.step.item(), self.genetic_migration_every)
+            ):
+                self.gene_pool.migrate()
+
             # update based on eq (3) and (4) in the paper
             # their contribution is basically to use reward deltas (for a given noise and its negative sign) for sorting for the 'elite' directions
 
@@ -968,7 +973,9 @@ class BlackboxGradientSensing(Module):
 
             # mask out any noise candidates whose max reward mean is greater than baseline
 
-            accept_mask = torch.amax(reward_mean, dim = -1) > baseline_mean
+            reward_threshold_accept = baseline_mean - reward_std * self.num_std_below_mean_thres_accept
+
+            accept_mask = torch.amax(reward_mean, dim = -1) > reward_threshold_accept
 
             reward_deltas = reward_deltas[accept_mask]
 
