@@ -1,6 +1,6 @@
 [project]
 name = "blackbox-gradient-sensing"
-version = "0.2.22"
+version = "0.3.0"
 description = "Blackbox Gradient Sensing"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -23,6 +23,7 @@ classifiers=[
 
 dependencies = [
     'accelerate',
+    'einx>=0.3.0',
     'einops>=0.8.0',
     'ema-pytorch',
     'torch>=2.4',
