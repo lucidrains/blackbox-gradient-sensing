@@ -11,8 +11,8 @@ dim_state = sim.observation_space.shape[0]
 
 # hyperparams
 
-num_noises = 40     # number of noise perturbations, from which top is chosen for a weighted update - in paper this was 200 for sim, 3 for real
-num_selected = 8    # number of elite perturbations chosen
+num_noises = 100     # number of noise perturbations, from which top is chosen for a weighted update - in paper this was 200 for sim, 3 for real
+num_selected = 15    # number of elite perturbations chosen
 num_repeats = 3     # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
 
 use_genetic_algorithm = False
@@ -66,6 +66,7 @@ if bgs.is_main:
     rmtree(video_folder, ignore_errors = True)
 
     den = bgs.num_episodes_per_learning_cycle
+
     total_eps_before_update = ceil(500 / den) * den
 
     sim = gym.wrappers.RecordVideo(
