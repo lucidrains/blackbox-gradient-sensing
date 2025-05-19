@@ -49,7 +49,8 @@ bgs = BlackboxGradientSensing(
     ),
     latent_gene_pool = dict(
         dim = dim_gene,
-        num_genes = num_genes,
+        num_islands = 1,
+        num_genes_per_island = num_genes,
         num_selected = num_selected,
         tournament_size = tournament_size
     ) if use_genetic_algorithm else None

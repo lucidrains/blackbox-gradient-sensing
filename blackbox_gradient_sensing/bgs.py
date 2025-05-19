@@ -20,6 +20,7 @@ torch.set_float32_matmul_precision('high')
 
 from torch.nn.utils.parametrizations import weight_norm
 
+import einx
 from einops import reduce, repeat, rearrange, einsum, pack, unpack
 from einops.layers.torch import Rearrange
 
@@ -28,6 +29,10 @@ from ema_pytorch import EMA
 from tqdm import tqdm as orig_tqdm
 
 from accelerate import Accelerator
+
+# constants
+
+GENES_PARAM_NAME = '.genes'
 
 # helpers
 
@@ -416,6 +421,7 @@ class BlackboxGradientSensing(Module):
         state_norm: StateNorm | Module | dict | None  = None,
         actor_is_recurrent = False,
         latent_gene_pool: LatentGenePool | dict | None = None,
+        concat_latent_to_state = False, # if False, will pass in the latents as a kwarg `latent`, else try to concat it to the state
         genetic_migration_every = 100,
         crossover_every_step = 1,
         crossover_after_step = 0,
@@ -441,7 +447,6 @@ class BlackboxGradientSensing(Module):
         post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
         num_std_below_mean_thres_accept = 0.5,
-        threshold_accept_learning_cycle = 2,
         cpu = False,
         torch_compile_actor = True,
         use_ema = False,
@@ -533,6 +538,7 @@ class BlackboxGradientSensing(Module):
             num_genes = gene_pool.num_genes
 
         self.actor_accepts_latents = exists(gene_pool)
+        self.concat_latent_to_state = concat_latent_to_state
 
         self.gene_pool = gene_pool
         self.num_genes = num_genes
@@ -604,11 +610,6 @@ class BlackboxGradientSensing(Module):
         rollouts_for_machine = gene_mutation_indices.chunk(world_size)[rank]
 
         self.register_buffer('rollouts_for_machine', rollouts_for_machine, persistent = False)
-
-        # threshold of valid reward deltas in order to accept weighted mutations
-
-        assert 2 <= threshold_accept_learning_cycle <= noise_pop_size
-        self.threshold_accept_learning_cycle = threshold_accept_learning_cycle
 
         # for each reward and its anti, the number of standard deviations below the baseline they can be for acceptance
 
@@ -846,8 +847,11 @@ class BlackboxGradientSensing(Module):
                                 state = self.state_norm(state)
 
                             kwargs = dict()
+
                             if is_recurrent_actor:
                                 kwargs.update(hiddens = mem)
+
+                            actor_state_input = state
 
                             if self.actor_accepts_latents:
 
@@ -856,9 +860,12 @@ class BlackboxGradientSensing(Module):
 
                                     latent_gene = latent_gene + latent_gene_noise
 
-                                kwargs.update(latent = latent_gene)
+                                if self.concat_latent_to_state:
+                                    actor_state_input = cat((state, latent_gene))
+                                else:
+                                    kwargs.update(latent = latent_gene)
 
-                            actor_out = functional_call(actor, param_with_noise, state, kwargs = kwargs)
+                            actor_out = functional_call(actor, param_with_noise, actor_state_input, kwargs = kwargs)
 
                             # take care of recurrent network
                             # the nicest thing about ES is learning recurrence / memory without much hassle (in fact, can be non-differentiable)
@@ -950,6 +957,17 @@ class BlackboxGradientSensing(Module):
 
                 reward_stats = self.gene_pool.merge_islands(reward_stats)
 
+                # handle selecting out the latent noises if mutating genes
+
+                if self.mutate_latent_genes:
+
+                    all_latent_noises = rearrange(all_latent_noises, 'n (i g) d -> n i g d', i = self.gene_pool.num_islands)
+
+                    num_noises_arange = arange_like(all_latent_noises, dim = 0)
+                    all_latent_noises = all_latent_noises[num_noises_arange[:, None, None], islands_arange[:, None], sel_gene_indices]
+
+                    all_latent_noises = rearrange(all_latent_noises, 'n i g d -> n (i g) d', i = self.gene_pool.num_islands)
+
             # maybe migration for genes
 
             if (
@@ -965,44 +983,63 @@ class BlackboxGradientSensing(Module):
 
             reward_std = reward_stats.std()
 
-            reward_mean = reduce(reward_stats, 'g n s e -> n s', 'mean')
+            def calculate_acceptance_and_update_weights(reward_mean, log = True):
 
-            baseline_mean, reward_mean = reward_mean[0].mean(), reward_mean[1:]
+                baseline_mean, reward_mean = reward_mean[..., 0, :].mean(dim = -1), reward_mean[..., 1:, :]
 
-            reward_deltas = reward_mean[:, 0] - reward_mean[:, 1]
+                reward_deltas = reward_mean[..., 0] - reward_mean[..., 1]
 
-            # mask out any noise candidates whose max reward mean is greater than baseline
+                # mask out any noise candidates whose max reward mean is greater than baseline
 
-            reward_threshold_accept = baseline_mean - reward_std * self.num_std_below_mean_thres_accept
+                reward_threshold_accept = baseline_mean - reward_std * self.num_std_below_mean_thres_accept
 
-            accept_mask = torch.amax(reward_mean, dim = -1) > reward_threshold_accept
+                max_reward_mean = torch.amax(reward_mean, dim = -1)
 
-            reward_deltas = reward_deltas[accept_mask]
+                accept_mask = einx.greater_equal('... n, ... -> ... n', max_reward_mean, reward_threshold_accept)
 
-            if reward_deltas.numel() < self.threshold_accept_learning_cycle:
-                continue
+                reward_deltas = reward_deltas * accept_mask # just zero out the reward deltas that do not pass the threshold
 
-            num_accepted = accept_mask.sum().item()
+                # get the top performing noise indices
 
-            # get the top performing noise indices
+                k = min(num_selected, reward_deltas.numel() // 2)
 
-            k = min(num_selected, reward_deltas.numel() // 2)
+                ranked_reward_deltas, ranked_reward_indices = reward_deltas.abs().topk(k, dim = -1)
 
-            ranked_reward_deltas, ranked_reward_indices = reward_deltas.abs().topk(k, dim = 0)
+                # get the weights for the weighted sum of the topk noise according to eq (3)
 
-            # get the weights for the weighted sum of the topk noise according to eq (3)
+                weights = ranked_reward_deltas / reward_std.clamp(min = 1e-3)
 
-            weights = ranked_reward_deltas / reward_std.clamp(min = 1e-3)
+                # multiply by sign
 
-            # multiply by sign
+                weights *= torch.sign(reward_deltas.gather(-1, ranked_reward_indices))
 
-            weights *= torch.sign(reward_deltas[ranked_reward_indices]
-    )
-            # update latents if needed
+                # logging
 
-            if self.actor_accepts_latents and self.mutate_latent_genes:
-                noises['.gene_pool'] = all_latent_noises
-                params['.gene_pool'] = self.gene_pool.genes
+                if log:
+
+                    # progress bar
+
+                    learning_updates.set_description(join([
+                        f'rewards: {baseline_mean.mean().item():.2f}',
+                        f'best: {reward_mean.amax().item():.2f}',
+                        f'best delta: {ranked_reward_deltas.amax().item():.2f}',
+                        f'accepted: {accept_mask.sum().item()} / {noise_pop_size}'
+                    ], ' | '))
+
+                    # log to experiment tracker
+
+                    self.log(
+                        rewards = baseline_mean.mean().item()
+                    )
+
+                return weights, ranked_reward_indices
+
+            # get the weights for update
+
+            (
+                weights,
+                ranked_reward_indices,
+            ) = calculate_acceptance_and_update_weights(reduce(reward_stats, 'g n s e -> n s', 'mean'))
 
             # update the param one by one
 
@@ -1012,11 +1049,47 @@ class BlackboxGradientSensing(Module):
 
                 # add the best "elite" noise directions weighted by eq (3)
 
-                best_noises = noise[1:][accept_mask][ranked_reward_indices]
+                best_noises = noise[1:][ranked_reward_indices]
 
                 update = einsum(best_noises, weights, 'n ..., n -> ...')
 
                 param.grad = -update
+
+            # update latents if needed
+
+            if self.actor_accepts_latents and self.mutate_latent_genes:
+
+                (
+                    weights,
+                    ranked_reward_indices,
+                ) = calculate_acceptance_and_update_weights(reduce(reward_stats, 'g n s e -> g n s', 'mean'), log = False)
+
+                # [n] g d, g sel -> sel g d
+
+                ranked_reward_indices = rearrange(ranked_reward_indices, 'g sel -> sel g')
+
+                ranked_reward_indices_for_gather = repeat(ranked_reward_indices, '... -> ... d', d = all_latent_noises.shape[-1])
+
+                sel_noises = all_latent_noises.gather(0, ranked_reward_indices_for_gather)
+
+                # weighted update, accounting for population dimension
+
+                update = einsum(sel_noises, weights, 'sel g ..., g sel -> g ...')
+
+                genes = self.gene_pool.genes
+
+                # need to account for new children from crossover, which do not get an update
+                # further more need to account for island dimension
+
+                update = self.gene_pool.split_islands(update)
+
+                update = F.pad(update, (0, 0, 0, self.gene_pool.num_genes_per_island - update.shape[1]), value = 0.)
+
+                update = self.gene_pool.merge_islands(update)
+
+                # add to update
+
+                genes.grad = -update
 
             # decay for norm gammas back to identity
 
@@ -1033,18 +1106,3 @@ class BlackboxGradientSensing(Module):
 
             if self.use_ema:
                 self.ema_actor.update()
-
-            # progress bar
-
-            learning_updates.set_description(join([
-                f'rewards: {baseline_mean.mean().item():.2f}',
-                f'best: {reward_mean.amax().item():.2f}',
-                f'best delta: {ranked_reward_deltas.amax().item():.2f}',
-                f'accepted: {num_accepted} / {noise_pop_size}'
-            ], ' | '))
-
-            # log to experiment tracker
-
-            self.log(
-                rewards = baseline_mean.mean().item()
-            )
