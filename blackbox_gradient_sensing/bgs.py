@@ -929,49 +929,6 @@ class BlackboxGradientSensing(Module):
                 for state in episode_states:
                     self.state_norm(state)
 
-            # maybe crossover, if a genetic population is present
-            # the crossover needs to happen before the mutation, as we will discard the mutation contributions from the genes that get selected out.
-
-            if (
-                exists(self.gene_pool) and
-                self.step.item() > self.crossover_after_step and
-                divisible_by(self.step.item(), self.crossover_every_step)
-            ):
-
-                # only include baseline for now, but could include the mutation rewards for selecting for meta-learning attributes.
-
-                fitnesses = self.calc_fitness(reward_stats)
-
-                self.sync_seed_()
-                sel_gene_indices = self.gene_pool.evolve_with_cross_over(fitnesses)
-
-                reward_stats = self.gene_pool.split_islands(reward_stats)
-
-                islands_arange = arange_like(sel_gene_indices, dim = 0)
-
-                reward_stats = reward_stats[islands_arange[:, None], sel_gene_indices]
-
-                reward_stats = self.gene_pool.merge_islands(reward_stats)
-
-                # handle selecting out the latent noises if mutating genes
-
-                if self.mutate_latent_genes:
-
-                    all_latent_noises = rearrange(all_latent_noises, 'n (i g) d -> n i g d', i = self.gene_pool.num_islands)
-
-                    num_noises_arange = arange_like(all_latent_noises, dim = 0)
-                    all_latent_noises = all_latent_noises[num_noises_arange[:, None, None], islands_arange[:, None], sel_gene_indices]
-
-                    all_latent_noises = rearrange(all_latent_noises, 'n i g d -> n (i g) d', i = self.gene_pool.num_islands)
-
-            # maybe migration for genes
-
-            if (
-                exists(self.gene_pool) and
-                divisible_by(self.step.item(), self.genetic_migration_every)
-            ):
-                self.gene_pool.migrate()
-
             # update based on eq (3) and (4) in the paper
             # their contribution is basically to use reward deltas (for a given noise and its negative sign) for sorting for the 'elite' directions
 
@@ -1074,15 +1031,6 @@ class BlackboxGradientSensing(Module):
 
                 genes = self.gene_pool.genes
 
-                # need to account for new children from crossover, which do not get an update
-                # further more need to account for island dimension
-
-                update = self.gene_pool.split_islands(update)
-
-                update = F.pad(update, (0, 0, 0, self.gene_pool.num_genes_per_island - update.shape[1]), value = 0.)
-
-                update = self.gene_pool.merge_islands(update)
-
                 # add to update
 
                 genes.grad = -update
@@ -1102,3 +1050,26 @@ class BlackboxGradientSensing(Module):
 
             if self.use_ema:
                 self.ema_actor.update()
+
+            # maybe crossover, if a genetic population is present
+            # the crossover needs to happen before the mutation, as we will discard the mutation contributions from the genes that get selected out.
+
+            if (
+                exists(self.gene_pool) and
+                self.step.item() > self.crossover_after_step and
+                divisible_by(self.step.item(), self.crossover_every_step)
+            ):
+                # only include baseline for now, but could include the mutation rewards for selecting for meta-learning attributes.
+
+                fitnesses = self.calc_fitness(reward_stats)
+
+                self.sync_seed_()
+                self.gene_pool.evolve_with_cross_over(fitnesses)
+
+            # maybe migration for genes
+
+            if (
+                exists(self.gene_pool) and
+                divisible_by(self.step.item(), self.genetic_migration_every)
+            ):
+                self.gene_pool.migrate()
