@@ -31,6 +31,7 @@ class Sim:
 @pytest.mark.parametrize('use_genetic_algorithm', (True, False))
 @pytest.mark.parametrize('num_islands', (1, 2))
 @pytest.mark.parametrize('mutate_latent_genes', (True, False))
+@pytest.mark.parametrize('optimize_partial_network', (True, False))
 @pytest.mark.parametrize('use_ema', (True, False))
 def test_bgs(
     factorized_noise,
@@ -40,6 +41,7 @@ def test_bgs(
     use_genetic_algorithm,
     num_islands,
     mutate_latent_genes,
+    optimize_partial_network,
     use_ema
 ):
 
@@ -57,7 +59,11 @@ def test_bgs(
     if use_custom_actor:
         actor = nn.Linear(5, 2)
 
-        if actor_is_recurrent or use_genetic_algorithm:
+        if (
+            actor_is_recurrent or
+            use_genetic_algorithm or
+            optimize_partial_network
+        ):
             pytest.skip()
 
     # maybe state norm
@@ -94,6 +100,7 @@ def test_bgs(
         state_norm = state_norm,
         actor_is_recurrent = actor_is_recurrent,
         latent_gene_pool = latent_gene_pool,
+        modules_to_optimize = {'to_embed'} if optimize_partial_network else None,
         genetic_migration_every = 1,
         cpu = True,
         use_ema = use_ema
