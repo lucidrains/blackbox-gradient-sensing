@@ -131,3 +131,12 @@ $ accelerate launch train.py
     url     = {https://api.semanticscholar.org/CorpusID:277313729}
 }
 ```
+
+```bibtex
+@inproceedings{Kumar2025QuestioningRO,
+    title   = {Questioning Representational Optimism in Deep Learning: The Fractured Entangled Representation Hypothesis},
+    author  = {Akarsh Kumar and Jeff Clune and Joel Lehman and Kenneth O. Stanley},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:278740993}
+}
+```
