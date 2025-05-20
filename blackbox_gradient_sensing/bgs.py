@@ -613,7 +613,7 @@ class BlackboxGradientSensing(Module):
 
         # expose a few computed variables
 
-        self.num_episodes_per_learning_cycle = self.rollouts_for_machine.shape[0] * num_rollout_repeats
+        self.num_episodes_per_learning_cycle = self.rollouts_for_machine.shape[0] * num_rollout_repeats * 2
 
         self.is_main = rank == 0
 

@@ -13,7 +13,7 @@ dim_state = sim.observation_space.shape[0]
 
 num_noises = 100     # number of noise perturbations, from which top is chosen for a weighted update - in paper this was 200 for sim, 3 for real
 num_selected = 15    # number of elite perturbations chosen
-num_repeats = 3     # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
+num_repeats = 5     # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
 
 use_genetic_algorithm = False
 dim_gene = 32
