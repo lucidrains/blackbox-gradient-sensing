@@ -1,4 +1,4 @@
-from adam_atan2_pytorch import AdoptAtan2
+from adam_atan2_pytorch import AdamAtan2
 from blackbox_gradient_sensing import BlackboxGradientSensing, Actor
 
 # sim environment, example using gymansium
@@ -40,7 +40,7 @@ bgs = BlackboxGradientSensing(
     use_ema = True,
     optim_step_post_hook = lambda: actor.norm_weights_(),
     torch_compile_actor = True,
-    optim_klass = AdoptAtan2,
+    optim_klass = AdamAtan2,
     state_norm = dict(
         dim_state = dim_state
     ),
