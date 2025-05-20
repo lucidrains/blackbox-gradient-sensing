@@ -21,6 +21,10 @@ num_genes = 6
 num_selected = 4
 tournament_size = 2
 
+# recording
+
+min_eps_before_update = 1000
+
 # instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
 # you can also supply your own Actor, which simply receives a state tensor and outputs action logits
 
@@ -67,7 +71,7 @@ if bgs.is_main:
 
     den = bgs.num_episodes_per_learning_cycle
 
-    total_eps_before_update = ceil(500 / den) * den
+    total_eps_before_update = ceil(min_eps_before_update / den) * den
 
     sim = gym.wrappers.RecordVideo(
         env = sim,

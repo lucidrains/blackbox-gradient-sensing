@@ -430,17 +430,16 @@ class BlackboxGradientSensing(Module):
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
         optim_klass = Adam,
-        learning_rate = 8e-2,
+        learning_rate = 1e-1,
         weight_decay = 1e-4,
         betas = (0.9, 0.95),
-        max_timesteps = 400,
+        max_timesteps = 500,
         calc_fitness: Callable[[Tensor], Tensor] | None = None,
         param_names: set[str] | str | None = None,
         modules_to_optimize: set[str] | str | None = None,
         show_progress = True,
         optim_kwargs: dict = dict(),
         optim_step_post_hook: Callable | None = None,
-        post_noise_added_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
         num_std_below_mean_thres_accept = 0.5,
         cpu = False,
@@ -522,6 +521,10 @@ class BlackboxGradientSensing(Module):
 
         self.noise_std_dev = noise_std_dev
 
+        # env interactions
+
+        self.max_timesteps = max_timesteps
+
         # gene pool, another axis for scaling and bitter lesson
 
         num_genes = 1
@@ -562,7 +565,7 @@ class BlackboxGradientSensing(Module):
         if self.actor_accepts_latents and self.mutate_latent_genes:
             optim_params.append(gene_pool.genes)
 
-        self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas)
+        self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas, **optim_kwargs)
 
         self.weight_decay = weight_decay
 
@@ -694,8 +697,9 @@ class BlackboxGradientSensing(Module):
         num_env_interactions = None,
         show_progress = None,
         seed = None,
-        max_timesteps_per_interaction = 500,
+        max_timesteps_per_interaction = None,
     ):
+        max_timesteps_per_interaction = default(max_timesteps_per_interaction, self.max_timesteps)
         show_progress = default(show_progress, self.show_progress)
         num_env_interactions = default(num_env_interactions, self.num_env_interactions)
 
