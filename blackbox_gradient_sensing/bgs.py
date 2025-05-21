@@ -561,11 +561,9 @@ class BlackboxGradientSensing(Module):
 
         optim_params = [named_params[param_name] for param_name in self.param_names]
 
-        if self.actor_accepts_latents and self.mutate_latent_genes:
-            optim_params.append(gene_pool.genes)
-
         self.optim = optim_klass(optim_params, lr = learning_rate, betas = betas, **optim_kwargs)
 
+        self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
         # hooks
@@ -708,12 +706,13 @@ class BlackboxGradientSensing(Module):
         num_env_interactions = default(num_env_interactions, self.num_env_interactions)
 
         (
+            learning_rate,
             num_selected,
             noise_pop_size,
             num_rollout_repeats,
             factorized_noise,
             noise_std_dev
-        ) = self.num_selected, self.noise_pop_size, self.num_rollout_repeats, self.factorized_noise, self.noise_std_dev
+        ) = self.learning_rate, self.num_selected, self.noise_pop_size, self.num_rollout_repeats, self.factorized_noise, self.noise_std_dev
 
         acc, optim = self.accelerator, self.optim
 
@@ -1038,7 +1037,7 @@ class BlackboxGradientSensing(Module):
 
                 # add to update
 
-                genes.grad = -update
+                genes.add_(update * learning_rate)
 
             # decay for norm gammas back to identity
 
