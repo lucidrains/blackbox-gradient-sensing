@@ -439,7 +439,8 @@ class BlackboxGradientSensing(Module):
         optim_kwargs: dict = dict(),
         optim_step_post_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
-        num_std_below_mean_thres_accept = 0.5,
+        num_std_below_mean_thres_accept = 0.5, # for each reward + anti, if they are below this number of standard deviations below the mean, reject it
+        frac_genes_pass_thres_accept = 0.9,    # in population based training, the fraction of genes that must be all above a given reward threshold for that noise to be accepted
         cpu = False,
         torch_compile_actor = True,
         use_ema = False,
@@ -611,6 +612,11 @@ class BlackboxGradientSensing(Module):
         # for each reward and its anti, the number of standard deviations below the baseline they can be for acceptance
 
         self.num_std_below_mean_thres_accept = num_std_below_mean_thres_accept
+
+        # the fraction of genes that must be above the given reward threshold as defined by the variable above, in order for said noise to be accepted
+
+        assert 0 <= frac_genes_pass_thres_accept <= 1.
+        self.frac_genes_pass_thres_accept = frac_genes_pass_thres_accept
 
         # expose a few computed variables
 
@@ -953,7 +959,7 @@ class BlackboxGradientSensing(Module):
             max_reward_mean = torch.amax(reward_mean, dim = -1)
 
             accept_mask = einx.greater_equal('g n, g -> g n', max_reward_mean, reward_threshold_accept)
-            accept_mask = reduce(accept_mask, 'g n -> n', 'all')
+            accept_mask = reduce(accept_mask.float(), 'g n -> n', 'mean') >= self.frac_genes_pass_thres_accept
 
             reward_deltas = einx.multiply('g n, n', reward_deltas, accept_mask.float()) # just zero out the reward deltas that do not pass the threshold
 
