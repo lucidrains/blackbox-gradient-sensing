@@ -13,12 +13,12 @@ dim_state = sim.observation_space.shape[0]
 
 num_noises = 100     # number of noise perturbations, from which top is chosen for a weighted update - in paper this was 200 for sim, 3 for real
 num_selected = 15    # number of elite perturbations chosen
-num_repeats = 5     # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
+num_repeats = 4      # number of repeats (j in eq) - in paper they did ~10 for sim, then 3 for real
 
-use_genetic_algorithm = False
+use_genetic_algorithm = True
 dim_gene = 32
-num_genes = 6
-num_selected = 4
+num_genes = 3
+num_selected = 2
 tournament_size = 2
 
 # recording
@@ -44,6 +44,9 @@ bgs = BlackboxGradientSensing(
     use_ema = True,
     optim_step_post_hook = lambda: actor.norm_weights_(),
     torch_compile_actor = True,
+    mutate_latent_genes = True,
+    crossover_after_step = 100,
+    crossover_every_step = 10,
     optim_klass = AdamAtan2,
     state_norm = dict(
         dim_state = dim_state

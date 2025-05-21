@@ -171,10 +171,8 @@ class Actor(Module):
         if accepts_latent:
             assert exists(dim_latent)
 
-            self.encode_latent = nn.Sequential(
-                nn.Linear(dim_latent, hidden_dim),
-                nn.SiLU()
-            )
+            self.encode_latent = nn.Linear(dim_latent, hidden_dim)
+            self.encode_latent = weight_norm(self.encode_latent, name = 'weight', dim = None)
 
         self.register_buffer('init_hiddens', torch.zeros(hidden_dim))
 
@@ -204,7 +202,7 @@ class Actor(Module):
 
         if self.accepts_latent:
             latent = l2norm(latent) # could be noised
-            x = x * self.encode_latent(latent)
+            x = x * F.sigmoid(self.encode_latent(latent))
 
         x = self.to_embed(x)
         x = F.silu(x)
@@ -430,7 +428,7 @@ class BlackboxGradientSensing(Module):
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
         optim_klass = Adam,
-        learning_rate = 1e-1,
+        learning_rate = 5e-2,
         weight_decay = 1e-4,
         betas = (0.9, 0.95),
         max_timesteps = 500,
@@ -940,21 +938,34 @@ class BlackboxGradientSensing(Module):
 
             reward_std = reward_stats.std()
 
-            def calculate_acceptance_and_update_weights(reward_mean, log = True):
+            reward_mean = reduce(reward_stats, 'g n s e -> g n s', 'mean')
 
-                baseline_mean, reward_mean = reward_mean[..., 0, :].mean(dim = -1), reward_mean[..., 1:, :]
+            # split out the baseline
 
-                reward_deltas = reward_mean[..., 0] - reward_mean[..., 1]
+            baseline_mean, reward_mean = reward_mean[..., 0, :].mean(dim = -1), reward_mean[..., 1:, :]
 
-                # mask out any noise candidates whose max reward mean is greater than baseline
+            reward_deltas = reward_mean[..., 0] - reward_mean[..., 1]
 
-                reward_threshold_accept = baseline_mean - reward_std * self.num_std_below_mean_thres_accept
+            # mask out any noise candidates whose max reward mean is greater than baseline
 
-                max_reward_mean = torch.amax(reward_mean, dim = -1)
+            reward_threshold_accept = baseline_mean - reward_std * self.num_std_below_mean_thres_accept
 
-                accept_mask = einx.greater_equal('... n, ... -> ... n', max_reward_mean, reward_threshold_accept)
+            max_reward_mean = torch.amax(reward_mean, dim = -1)
 
-                reward_deltas = reward_deltas * accept_mask # just zero out the reward deltas that do not pass the threshold
+            accept_mask = einx.greater_equal('g n, g -> g n', max_reward_mean, reward_threshold_accept)
+            accept_mask = reduce(accept_mask, 'g n -> n', 'all')
+
+            reward_deltas = einx.multiply('g n, n', reward_deltas, accept_mask.float()) # just zero out the reward deltas that do not pass the threshold
+
+            # progress bar
+
+            pbar_descriptions = [
+                f'rewards: {baseline_mean.mean().item():.2f}',
+                f'best: {reward_mean.amax().item():.2f}',
+                f'accepted: {accept_mask.sum().item()} / {noise_pop_size}'
+            ]
+
+            def calculate_weights(reward_deltas, log = True):
 
                 # get the top performing noise indices
 
@@ -970,24 +981,8 @@ class BlackboxGradientSensing(Module):
 
                 weights *= torch.sign(reward_deltas.gather(-1, ranked_reward_indices))
 
-                # logging
-
                 if log:
-
-                    # progress bar
-
-                    learning_updates.set_description(join([
-                        f'rewards: {baseline_mean.mean().item():.2f}',
-                        f'best: {reward_mean.amax().item():.2f}',
-                        f'best delta: {ranked_reward_deltas.amax().item():.2f}',
-                        f'accepted: {accept_mask.sum().item()} / {noise_pop_size}'
-                    ], ' | '))
-
-                    # log to experiment tracker
-
-                    self.log(
-                        rewards = baseline_mean.mean().item()
-                    )
+                    pbar_descriptions.append(f'best delta: {ranked_reward_deltas.amax().item():.2f}')
 
                 return weights, ranked_reward_indices
 
@@ -996,7 +991,7 @@ class BlackboxGradientSensing(Module):
             (
                 weights,
                 ranked_reward_indices,
-            ) = calculate_acceptance_and_update_weights(reduce(reward_stats, 'g n s e -> n s', 'mean'))
+            ) = calculate_weights(reduce(reward_deltas, 'g n -> n', 'mean'))
 
             # update the param one by one
 
@@ -1019,7 +1014,7 @@ class BlackboxGradientSensing(Module):
                 (
                     weights,
                     ranked_reward_indices,
-                ) = calculate_acceptance_and_update_weights(reduce(reward_stats, 'g n s e -> g n s', 'mean'), log = False)
+                ) = calculate_weights(reward_deltas, log = False)
 
                 # [n] g d, g sel -> sel g d
 
@@ -1077,3 +1072,13 @@ class BlackboxGradientSensing(Module):
                 divisible_by(self.step.item(), self.genetic_migration_every)
             ):
                 self.gene_pool.migrate()
+
+            # logging
+
+            learning_updates.set_description(join(pbar_descriptions, ' | '))
+
+            # log to experiment tracker
+
+            self.log(
+                rewards = baseline_mean.mean().item()
+            )
