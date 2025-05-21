@@ -1,6 +1,6 @@
 [project]
 name = "blackbox-gradient-sensing"
-version = "0.3.8"
+version = "0.4.0"
 description = "Blackbox Gradient Sensing"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -12,6 +12,7 @@ keywords = [
     'artificial intelligence',
     'deep learning',
     'evolutionary strategies',
+    'genetic algorithms'
   ]
 classifiers=[
     'Development Status :: 4 - Beta',

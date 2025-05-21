@@ -82,6 +82,7 @@ def test_bgs(
             dim = 32,
             num_genes_per_island = 3,
             num_islands = num_islands,
+            migrate_genes_every = 1,
             num_selected = 2,
             tournament_size = 2
         )
@@ -101,7 +102,6 @@ def test_bgs(
         actor_is_recurrent = actor_is_recurrent,
         latent_gene_pool = latent_gene_pool,
         modules_to_optimize = {'to_embed'} if optimize_partial_network else None,
-        genetic_migration_every = 1,
         cpu = True,
         use_ema = use_ema
     )
@@ -124,10 +124,11 @@ def test_cross_over(
         dim = 32,
         num_genes_per_island = 3,
         num_islands = num_islands,
+        migrate_genes_every = 1,
         num_selected = 2,
         tournament_size = 2
     )
 
     fitness = torch.randn(3 * num_islands)
 
-    gene_pool.evolve_with_cross_over(fitness)
+    gene_pool.evolve(fitness)

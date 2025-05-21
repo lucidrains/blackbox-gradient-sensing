@@ -266,10 +266,11 @@ class LatentGenePool(Module):
         num_genes_per_island,
         num_selected,
         tournament_size,
-        num_elites = 1, # exempt from genetic mutation
+        num_elites = 1,             # exempt from genetic mutation and migration
         mutation_std_dev = 0.1,
         num_islands = 1,
-        num_frac_migrate = 0.1 # migrate 10 percent of the bottom population
+        migrate_genes_every = 10,   # every number of evolution step to do a migration between islands, if using multi-islands for increasing diversity
+        num_frac_migrate = 0.1      # migrate 10 percent of the bottom population
     ):
         super().__init__()
         assert num_islands >= 1
@@ -299,36 +300,15 @@ class LatentGenePool(Module):
         assert 0. <= num_frac_migrate <= 1.
 
         self.num_frac_migrate = num_frac_migrate
+        self.migrate_genes_every = migrate_genes_every
+
+        self.register_buffer('step', tensor(0))
 
     def __getitem__(self, idx):
         return l2norm(self.genes[idx])
 
     @torch.inference_mode()
-    def migrate(
-        self,
-        genes = None
-    ):
-        if self.num_frac_migrate == 0. or self.num_islands == 1:
-            return
-
-        num_migrate = max(1, int(self.num_frac_migrate * self.num_genes_per_island))
-
-        genes = default(genes, self.genes)
-
-        genes = self.split_islands(genes)
-
-        # fixed migration pattern - what i observe to work best, for now
-
-        genes, migrants = genes[:, -num_migrate:], genes[:, :-num_migrate]
-
-        migrants = torch.roll(migrants, 1, dims = (1,))
-
-        genes = cat((genes, migrants), dim = 1)
-
-        self.genes.copy_(self.merge_islands(genes))
-
-    @torch.inference_mode()
-    def evolve_with_cross_over(
+    def evolve(
         self,
         fitnesses,
         temperature = 1.5
@@ -340,6 +320,7 @@ class LatentGenePool(Module):
 
         genes = self.genes
         num_islands = self.num_islands
+        has_elites = self.num_elites > 0
 
         fitnesses = self.split_islands(fitnesses)
         genes = self.split_islands(genes)
@@ -381,11 +362,38 @@ class LatentGenePool(Module):
 
         children = parent1.lerp(parent2, (torch.randn_like(parent1) / temperature).sigmoid())
 
+        # maybe migration
+
+        if (
+            divisible_by(self.step.item() + 1, self.migrate_genes_every) and
+            self.num_islands > 1 and
+            self.num_frac_migrate > 0.
+        ):
+
+            if has_elites:
+                elites, selected_genes = selected_genes[:, :1], selected_genes[:, 1:]
+
+            num_can_migrate = selected_genes.shape[1]
+
+            num_migrate = max(1, num_can_migrate * self.num_frac_migrate)
+
+            # fixed migration pattern - what i observe to work best, for now
+            # todo - option to make it randomly selected with a mask
+
+            selected_genes, migrants = selected_genes[:, -num_migrate:], selected_genes[:, :-num_migrate]
+
+            migrants = torch.roll(migrants, 1, dims = (1,))
+
+            selected_genes = cat((selected_genes, migrants), dim = 1)
+
+            if has_elites:
+                selected_genes = cat((elites, selected_genes), dim = 1)
+
+        # concat children
+
         genes = torch.cat((selected_genes, children), dim = 1)
 
         # mutate
-
-        has_elites = self.num_elites > 0
 
         if self.mutation_std_dev > 0:
 
@@ -400,6 +408,8 @@ class LatentGenePool(Module):
         genes = self.merge_islands(genes)
 
         self.genes.copy_(l2norm(genes))
+
+        self.step.add_(1)
 
         return selected_gene_ids # return the selected gene ids, for the outer learning orchestrator to determine which mutations to accept
 
@@ -416,7 +426,6 @@ class BlackboxGradientSensing(Module):
         actor_is_recurrent = False,
         latent_gene_pool: LatentGenePool | dict | None = None,
         concat_latent_to_state = False, # if False, will pass in the latents as a kwarg `latent`, else try to concat it to the state
-        genetic_migration_every = 100,
         crossover_every_step = 1,
         crossover_after_step = 0,
         num_env_interactions = 1000,
@@ -548,8 +557,6 @@ class BlackboxGradientSensing(Module):
 
         self.crossover_every_step = crossover_every_step
         self.crossover_after_step = crossover_after_step
-
-        self.genetic_migration_every = genetic_migration_every
 
         # whether to do heritable mutations to the latent genes
 
@@ -1068,15 +1075,7 @@ class BlackboxGradientSensing(Module):
                 fitnesses = self.calc_fitness(reward_stats)
 
                 self.sync_seed_()
-                self.gene_pool.evolve_with_cross_over(fitnesses)
-
-            # maybe migration for genes
-
-            if (
-                exists(self.gene_pool) and
-                divisible_by(self.step.item(), self.genetic_migration_every)
-            ):
-                self.gene_pool.migrate()
+                self.gene_pool.evolve(fitnesses)
 
             # logging
 
