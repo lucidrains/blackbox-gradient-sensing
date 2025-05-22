@@ -173,6 +173,7 @@ class Actor(Module):
 
             self.encode_latent = nn.Linear(dim_latent, hidden_dim)
             self.encode_latent = weight_norm(self.encode_latent, name = 'weight', dim = None)
+            self.post_norm_latent_added = nn.RMSNorm(hidden_dim)
 
         self.register_buffer('init_hiddens', torch.zeros(hidden_dim))
 
@@ -202,7 +203,8 @@ class Actor(Module):
 
         if self.accepts_latent:
             latent = l2norm(latent) # could be noised
-            x = x * F.sigmoid(self.encode_latent(latent))
+            x = x + self.encode_latent(latent)
+            x = self.post_norm_latent_added(x)
 
         x = self.to_embed(x)
         x = F.silu(x)
