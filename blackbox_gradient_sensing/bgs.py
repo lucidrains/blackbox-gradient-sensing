@@ -38,6 +38,9 @@ def exists(val):
 def default(v, d):
     return v if exists(v) else d
 
+def identity(t, *args, **kwargs):
+    return t
+
 def divisible_by(num, den):
     return (num % den) == 0
 
@@ -150,19 +153,23 @@ class Actor(Module):
         hidden_dim = 32,
         accepts_latent = False,
         dim_latent = None,
-        sample = False
+        sample = False,
+        weight_norm_linears = True
     ):
         super().__init__()
+        maybe_weight_norm = weight_norm if weight_norm_linears else identity
+        self.weight_norm_linears = weight_norm_linears
+
         self.mem_norm = nn.RMSNorm(hidden_dim)
 
         self.proj_in = nn.Linear(dim_state, hidden_dim + 1, bias = False)
-        self.proj_in = weight_norm(self.proj_in, name = 'weight', dim = None)
+        self.proj_in = maybe_weight_norm(self.proj_in, name = 'weight', dim = None)
 
         self.to_embed = nn.Linear(hidden_dim, hidden_dim, bias = False)
-        self.to_embed = weight_norm(self.to_embed, name = 'weight', dim = None)
+        self.to_embed = maybe_weight_norm(self.to_embed, name = 'weight', dim = None)
 
         self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
-        self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
+        self.to_logits = maybe_weight_norm(self.to_logits, name = 'weight', dim = None)
 
         self.norm_weights_()
 
@@ -177,12 +184,15 @@ class Actor(Module):
             assert exists(dim_latent)
 
             self.encode_latent = nn.Linear(dim_latent, hidden_dim)
-            self.encode_latent = weight_norm(self.encode_latent, name = 'weight', dim = None)
+            self.encode_latent = maybe_weight_norm(self.encode_latent, name = 'weight', dim = None)
             self.post_norm_latent_added = nn.RMSNorm(hidden_dim)
 
         self.register_buffer('init_hiddens', torch.zeros(hidden_dim))
 
     def norm_weights_(self):
+        if not self.weight_norm_linears:
+            return
+
         for param in self.parameters():
             if not isinstance(param, nn.Linear):
                 continue
