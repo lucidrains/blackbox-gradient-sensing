@@ -149,7 +149,8 @@ class Actor(Module):
         num_actions,
         hidden_dim = 32,
         accepts_latent = False,
-        dim_latent = None
+        dim_latent = None,
+        sample = False
     ):
         super().__init__()
         self.mem_norm = nn.RMSNorm(hidden_dim)
@@ -164,6 +165,10 @@ class Actor(Module):
         self.to_logits = weight_norm(self.to_logits, name = 'weight', dim = None)
 
         self.norm_weights_()
+
+        # whether to sample from the output discrete logits
+
+        self.sample = sample
 
         # for genes -> expression network (the analogy is growing on me)
 
@@ -188,7 +193,8 @@ class Actor(Module):
         self,
         x,
         hiddens = None,
-        latent = None
+        latent = None,
+        sample_temperature = 1.
     ):
         assert xnor(exists(latent), self.accepts_latent)
 
@@ -207,9 +213,18 @@ class Actor(Module):
             x = self.post_norm_latent_added(x)
 
         x = self.to_embed(x)
-        x = F.silu(x)
+        hiddens = F.silu(x)
 
-        return self.to_logits(x), x
+        action_logits = self.to_logits(hiddens)
+
+        if not self.sample:
+            return action_logits, hiddens
+
+        # actor can return sampled action(s) for the simulation / environment
+
+        actions = gumbel_sample(action_logits, temp = sample_temperature)
+
+        return actions, hiddens
 
 # an actor wrapper that contains the state normalizer and latent gene pool, defaults to calling the fittest gene
 
@@ -456,7 +471,8 @@ class BlackboxGradientSensing(Module):
         torch_compile_actor = True,
         use_ema = False,
         ema_decay = 0.95,
-        update_model_with_ema_every = 100
+        update_model_with_ema_every = 100,
+        sample_actions_from_actor = True
     ):
         super().__init__()
         assert num_selected < noise_pop_size, f'number of selected noise must be less than the total population of noise'
@@ -494,6 +510,10 @@ class BlackboxGradientSensing(Module):
 
         named_params = dict(actor.named_parameters())
         named_modules = dict(actor.named_modules())
+
+        # whether to sample actions from the actor
+
+        self.sample_actions_from_actor = sample_actions_from_actor
 
         # handle only a subset of parameters being optimized
 
@@ -883,9 +903,9 @@ class BlackboxGradientSensing(Module):
                             # the nicest thing about ES is learning recurrence / memory without much hassle (in fact, can be non-differentiable)
 
                             if isinstance(actor_out, tuple):
-                                action_logits, *actor_rest_out = actor_out
+                                action_or_logits, *actor_rest_out = actor_out
                             else:
-                                action_logits = actor_out
+                                action_or_logits = actor_out
                                 actor_rest_out = []
 
                             if is_recurrent_actor:
@@ -894,8 +914,11 @@ class BlackboxGradientSensing(Module):
 
                             # sample
 
-                            action = gumbel_sample(action_logits)
-                            action = action.item()
+                            if self.sample_actions_from_actor:
+                                action = gumbel_sample(action_or_logits)
+                                action = action.item()
+                            else:
+                                action = action_or_logits.item()
 
                             env_out = env.step(action)
 

@@ -32,7 +32,8 @@ actor = Actor(
     dim_state = dim_state,
     num_actions = sim.action_space.n,
     dim_latent = dim_gene,
-    accepts_latent = use_genetic_algorithm
+    accepts_latent = use_genetic_algorithm,
+    sample = True
 )
 
 bgs = BlackboxGradientSensing(
@@ -47,6 +48,7 @@ bgs = BlackboxGradientSensing(
     mutate_latent_genes = True,
     crossover_after_step = 100,
     crossover_every_step = 50,
+    sample_actions_from_actor = False,
     optim_klass = AdamAtan2,
     state_norm = dict(
         dim_state = dim_state
