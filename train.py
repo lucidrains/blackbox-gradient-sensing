@@ -33,7 +33,8 @@ actor = Actor(
     num_actions = sim.action_space.n,
     dim_latent = dim_gene,
     accepts_latent = use_genetic_algorithm,
-    sample = True
+    sample = True,
+    weight_norm_linears = True
 )
 
 bgs = BlackboxGradientSensing(
