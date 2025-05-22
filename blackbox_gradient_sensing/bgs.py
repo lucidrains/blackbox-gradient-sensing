@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from random import randrange
+from random import randrange, choice
 from functools import partial
 from pathlib import Path
 from typing import Callable
@@ -724,7 +724,7 @@ class BlackboxGradientSensing(Module):
     @torch.inference_mode()
     def forward(
         self,
-        env,
+        maybe_envs,
         num_env_interactions = None,
         show_progress = None,
         seed = None,
@@ -830,6 +830,13 @@ class BlackboxGradientSensing(Module):
                 all_latent_noises = torch.randn((pop_size_with_baseline, *genes_shape), device = device) * self.latent_gene_noise_std_dev
 
                 all_latent_noises[0].zero_() # first for baseline
+
+            # maybe domain randomization
+
+            if isinstance(maybe_envs, (list, tuple)):
+                env = choice(maybe_envs)
+            else:
+                env = maybe_envs
 
             # maybe shard the interaction with environments for the individual noise perturbations
 
