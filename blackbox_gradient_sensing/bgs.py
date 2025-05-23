@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import sqrt
 from copy import deepcopy
 from random import randrange, choice
 from functools import partial
@@ -40,6 +41,9 @@ def default(v, d):
 
 def identity(t, *args, **kwargs):
     return t
+
+def first(seq):
+    return seq[0]
 
 def divisible_by(num, den):
     return (num % den) == 0
@@ -460,7 +464,8 @@ class BlackboxGradientSensing(Module):
         noise_std_dev: dict[str, float] | float = 0.1, # Appendix F in paper, appears to be constant for sim and real
         mutate_latent_genes = False,
         latent_gene_noise_std_dev = 1e-4,
-        factorized_noise = True,
+        factorized_noise = False,
+        orthogonalized_noise = True,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
         optim_klass = Adam,
@@ -492,7 +497,11 @@ class BlackboxGradientSensing(Module):
         self.num_selected = num_selected
         self.noise_pop_size = noise_pop_size
         self.num_rollout_repeats = num_rollout_repeats
-        self.factorized_noise = factorized_noise # maybe factorized gaussian noise
+
+        self.orthogonalized_noise = orthogonalized_noise    # orthogonalized noise - todo: add the fast hadamard-rademacher ones proposed in paper
+        self.factorized_noise = factorized_noise            # maybe factorized gaussian noise
+
+        assert not (factorized_noise and orthogonalized_noise)
 
         # use accelerate to manage distributed
 
@@ -750,8 +759,17 @@ class BlackboxGradientSensing(Module):
             noise_pop_size,
             num_rollout_repeats,
             factorized_noise,
+            orthogonalized_noise,
             noise_std_dev
-        ) = self.learning_rate, self.num_selected, self.noise_pop_size, self.num_rollout_repeats, self.factorized_noise, self.noise_std_dev
+        ) = (
+            self.learning_rate,
+            self.num_selected,
+            self.noise_pop_size,
+            self.num_rollout_repeats,
+            self.factorized_noise,
+            self.orthogonalized_noise,
+            self.noise_std_dev
+        )
 
         acc, optim = self.accelerator, self.optim
 
@@ -817,6 +835,16 @@ class BlackboxGradientSensing(Module):
                     continue
 
                 param_noise_std_dev = noise_std_dev[key]
+
+                if orthogonalized_noise and param.ndim == 2:
+                    # p - population size
+
+                    noises_for_param = torch.randn((pop_size_with_baseline, *param.shape), device = device)
+
+                    noises_for_param, packed_shape = pack([noises_for_param], 'p *')
+                    scale = sqrt(noises_for_param.shape[-1])
+                    nn.init.orthogonal_(noises_for_param) * scale
+                    noises_for_param = first(unpack(noises_for_param, packed_shape, 'p *'))
 
                 if factorized_noise and param.ndim == 2:
                     i, j = param.shape
