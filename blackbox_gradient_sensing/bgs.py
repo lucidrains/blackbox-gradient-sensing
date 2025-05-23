@@ -12,7 +12,6 @@ import numpy as np
 import torch
 from torch import cat, nn, tensor, Tensor
 import torch.nn.functional as F
-from torch.nn.init import orthogonal_
 from torch.nn import Module, ModuleList, Parameter
 from torch.optim import Adam
 from torch.func import functional_call
@@ -82,6 +81,10 @@ def gumbel_sample(t, temp = 1.):
 
 def l2norm(t):
     return F.normalize(t, dim = -1, p = 2)
+
+def orthogonal_(t):
+    nn.init.orthogonal_(t)
+    return t * sqrt(t.shape[-1])
 
 def from_numpy(t):
     if isinstance(t, np.float64):
@@ -856,8 +859,7 @@ class BlackboxGradientSensing(Module):
                     noises_for_param = torch.randn((pop_size_with_baseline, *param.shape), device = device)
 
                     noises_for_param, packed_shape = pack([noises_for_param], 'p *')
-                    scale = sqrt(noises_for_param.shape[-1])
-                    orthogonal_(noises_for_param) * scale
+                    orthogonal_(noises_for_param)
                     noises_for_param = first(unpack(noises_for_param, packed_shape, 'p *'))
 
                 else:
