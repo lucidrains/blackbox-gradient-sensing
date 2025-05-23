@@ -50,6 +50,7 @@ bgs = BlackboxGradientSensing(
     crossover_after_step = 100,
     crossover_every_step = 50,
     sample_actions_from_actor = False,
+    factorized_noise = True,
     orthogonalized_noise = True,
     optim_klass = AdamAtan2,
     state_norm = dict(

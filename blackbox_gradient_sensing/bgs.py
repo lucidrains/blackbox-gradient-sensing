@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from torch import cat, nn, tensor, Tensor
 import torch.nn.functional as F
+from torch.nn.init import orthogonal_
 from torch.nn import Module, ModuleList, Parameter
 from torch.optim import Adam
 from torch.func import functional_call
@@ -498,11 +499,8 @@ class BlackboxGradientSensing(Module):
         self.noise_pop_size = noise_pop_size
         self.num_rollout_repeats = num_rollout_repeats
 
-        orthogonalized_noise = default(orthogonalized_noise, not factorized_noise)
         self.orthogonalized_noise = orthogonalized_noise    # orthogonalized noise - todo: add the fast hadamard-rademacher ones proposed in paper
         self.factorized_noise = factorized_noise            # maybe factorized gaussian noise
-
-        assert not (factorized_noise and orthogonalized_noise)
 
         # use accelerate to manage distributed
 
@@ -837,24 +835,31 @@ class BlackboxGradientSensing(Module):
 
                 param_noise_std_dev = noise_std_dev[key]
 
-                if orthogonalized_noise and param.ndim == 2:
+
+                if factorized_noise and param.ndim == 2:
+                    i, j = param.shape
+
+                    rows = torch.randn((pop_size_with_baseline, i), device = device)
+                    cols = torch.randn((pop_size_with_baseline, j), device = device)
+
+                    if orthogonalized_noise:
+                        rows = orthogonal_(rows)
+                        cols = orthogonal_(cols)
+
+                    rows, cols = tuple(t.sign() * t.abs().sqrt() for t in (rows, cols))
+
+                    noises_for_param = einx.multiply('p i, p j -> p i j', rows, cols)
+
+                elif orthogonalized_noise and param.ndim == 2:
                     # p - population size
 
                     noises_for_param = torch.randn((pop_size_with_baseline, *param.shape), device = device)
 
                     noises_for_param, packed_shape = pack([noises_for_param], 'p *')
                     scale = sqrt(noises_for_param.shape[-1])
-                    nn.init.orthogonal_(noises_for_param) * scale
+                    orthogonal_(noises_for_param) * scale
                     noises_for_param = first(unpack(noises_for_param, packed_shape, 'p *'))
 
-                if factorized_noise and param.ndim == 2:
-                    i, j = param.shape
-
-                    rows = torch.randn((pop_size_with_baseline, i, 1), device = device)
-                    cols = torch.randn((pop_size_with_baseline, 1, j), device = device)
-                    rows, cols = tuple(t.sign() * t.abs().sqrt() for t in (rows, cols))
-
-                    noises_for_param = rows * cols
                 else:
                     noises_for_param = torch.randn((pop_size_with_baseline, *param.shape), device = device)
 
