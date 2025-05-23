@@ -465,7 +465,7 @@ class BlackboxGradientSensing(Module):
         mutate_latent_genes = False,
         latent_gene_noise_std_dev = 1e-4,
         factorized_noise = False,
-        orthogonalized_noise = True,
+        orthogonalized_noise = None,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
         optim_klass = Adam,
@@ -498,6 +498,7 @@ class BlackboxGradientSensing(Module):
         self.noise_pop_size = noise_pop_size
         self.num_rollout_repeats = num_rollout_repeats
 
+        orthogonalized_noise = default(orthogonalized_noise, not factorized_noise)
         self.orthogonalized_noise = orthogonalized_noise    # orthogonalized noise - todo: add the fast hadamard-rademacher ones proposed in paper
         self.factorized_noise = factorized_noise            # maybe factorized gaussian noise
 
