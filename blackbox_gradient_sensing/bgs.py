@@ -83,7 +83,7 @@ def l2norm(t):
     return F.normalize(t, dim = -1, p = 2)
 
 def orthogonal_(t):
-    nn.init.orthogonal_(t)
+    nn.init.orthogonal_(t.t())
     return t * sqrt(t.shape[-1])
 
 def from_numpy(t):
@@ -465,11 +465,11 @@ class BlackboxGradientSensing(Module):
         crossover_after_step = 0,
         num_env_interactions = 1000,
         noise_pop_size = 40,
-        noise_std_dev: dict[str, float] | float = 0.1, # Appendix F in paper, appears to be constant for sim and real
+        noise_std_dev: dict[str, float] | float = 0.05, # Appendix F in paper, appears to be constant for sim and real
         mutate_latent_genes = False,
         latent_gene_noise_std_dev = 1e-4,
         factorized_noise = False,
-        orthogonalized_noise = None,
+        orthogonalized_noise = True,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
         optim_klass = Adam,
@@ -484,12 +484,12 @@ class BlackboxGradientSensing(Module):
         optim_kwargs: dict = dict(),
         optim_step_post_hook: Callable | None = None,
         accelerate_kwargs: dict = dict(),
-        num_std_below_mean_thres_accept = 0.5, # for each reward + anti, if they are below this number of standard deviations below the mean, reject it
+        num_std_below_mean_thres_accept = 0., # for each reward + anti, if they are below this number of standard deviations below the mean, reject it
         frac_genes_pass_thres_accept = 0.9,    # in population based training, the fraction of genes that must be all above a given reward threshold for that noise to be accepted
         cpu = False,
         torch_compile_actor = True,
         use_ema = False,
-        ema_decay = 0.95,
+        ema_decay = 0.9,
         update_model_with_ema_every = 100,
         sample_actions_from_actor = True
     ):

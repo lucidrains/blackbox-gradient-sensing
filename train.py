@@ -1,4 +1,3 @@
-from adam_atan2_pytorch import AdamAtan2
 from blackbox_gradient_sensing import BlackboxGradientSensing, Actor
 
 # sim environment, example using gymansium
@@ -43,21 +42,18 @@ bgs = BlackboxGradientSensing(
     num_selected = num_selected,
     num_rollout_repeats = num_repeats,
     actor_is_recurrent = True,
-    use_ema = False,
+    use_ema = True,
     optim_step_post_hook = lambda: actor.norm_weights_(),
     torch_compile_actor = True,
     mutate_latent_genes = True,
     crossover_after_step = 100,
     crossover_every_step = 50,
+    num_std_below_mean_thres_accept = -0.1, # only accept noise with rewards above 0.1 std dev of baseline mean
     sample_actions_from_actor = False,
     factorized_noise = True,
     orthogonalized_noise = True,
-    optim_klass = AdamAtan2,
     state_norm = dict(
         dim_state = dim_state
-    ),
-    optim_kwargs = dict(
-        cautious_factor = 0.1
     ),
     latent_gene_pool = dict(
         dim = dim_gene,
