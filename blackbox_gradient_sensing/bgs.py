@@ -468,7 +468,7 @@ class BlackboxGradientSensing(Module):
         noise_std_dev: dict[str, float] | float = 0.05, # Appendix F in paper, appears to be constant for sim and real
         mutate_latent_genes = False,
         latent_gene_noise_std_dev = 1e-4,
-        factorized_noise = False,
+        factorized_noise = True,
         orthogonalized_noise = True,
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
