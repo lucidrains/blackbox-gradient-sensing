@@ -176,6 +176,8 @@ class Actor(Module):
         self.to_embed = nn.Linear(hidden_dim, hidden_dim, bias = False)
         self.to_embed = maybe_weight_norm(self.to_embed, name = 'weight', dim = None)
 
+        self.final_norm = nn.RMSNorm(hidden_dim)
+
         self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
         self.to_logits = maybe_weight_norm(self.to_logits, name = 'weight', dim = None)
 
@@ -233,7 +235,8 @@ class Actor(Module):
         x = self.to_embed(x)
         hiddens = F.silu(x)
 
-        action_logits = self.to_logits(hiddens)
+        embed = self.final_norm(hiddens)
+        action_logits = self.to_logits(embed)
 
         if not self.sample:
             return action_logits, hiddens
@@ -465,7 +468,7 @@ class BlackboxGradientSensing(Module):
         crossover_after_step = 0,
         num_env_interactions = 1000,
         noise_pop_size = 40,
-        noise_std_dev: dict[str, float] | float = 0.05, # Appendix F in paper, appears to be constant for sim and real
+        noise_std_dev: dict[str, float] | float = 0.1, # Appendix F in paper, appears to be constant for sim and real
         mutate_latent_genes = False,
         latent_gene_noise_std_dev = 1e-4,
         factorized_noise = True,
@@ -473,7 +476,7 @@ class BlackboxGradientSensing(Module):
         num_selected = 8,    # of the population, how many of the best performing noise perturbations to accept
         num_rollout_repeats = 3,
         optim_klass = Adam,
-        learning_rate = 5e-2,
+        learning_rate = 8e-2,
         weight_decay = 1e-4,
         betas = (0.9, 0.95),
         max_timesteps = 500,

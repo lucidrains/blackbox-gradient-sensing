@@ -1,3 +1,4 @@
+adam-atan2-pytorch
 blackbox-gradient-sensing
 box2d-py
 gymnasium[box2d]>=1.0.0
