@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import random
+from random import randrange, choice
+
 from math import sqrt
 from copy import deepcopy
-from random import randrange, choice
 from functools import partial
 from pathlib import Path
 from typing import Callable
@@ -828,6 +830,8 @@ class BlackboxGradientSensing(Module):
             # todo - allow for multiple episodes per learning cycle or mutation accumulation
 
             episode_seed = torch.randint(0, int(1e7), ()).item()
+
+            random.seed(episode_seed)
 
             # create noises upfront
 
