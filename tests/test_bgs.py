@@ -33,6 +33,7 @@ class Sim:
 @pytest.mark.parametrize('mutate_latent_genes', (True, False))
 @pytest.mark.parametrize('optimize_partial_network', (True, False))
 @pytest.mark.parametrize('use_ema', (True, False))
+@pytest.mark.parametrize('continuous', (True, False))
 def test_bgs(
     factorized_noise,
     use_custom_actor,
@@ -42,7 +43,8 @@ def test_bgs(
     num_islands,
     mutate_latent_genes,
     optimize_partial_network,
-    use_ema
+    use_ema,
+    continuous
 ):
 
     sim = Sim()
@@ -51,6 +53,7 @@ def test_bgs(
         dim_state = 5,
         num_actions = 2,
         dim_latent = 32,
+        continuous = continuous,
         accepts_latent = use_genetic_algorithm
     ) # actor with weight norm
 
@@ -62,7 +65,8 @@ def test_bgs(
         if (
             actor_is_recurrent or
             use_genetic_algorithm or
-            optimize_partial_network
+            optimize_partial_network or
+            continuous
         ):
             pytest.skip()
 

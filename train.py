@@ -5,7 +5,13 @@ from blackbox_gradient_sensing import BlackboxGradientSensing, Actor
 
 import gymnasium as gym
 
-sim = gym.make('LunarLander-v3', render_mode = 'rgb_array')
+continuous = False
+
+sim = gym.make(
+    'LunarLander-v3',
+    render_mode = 'rgb_array',
+    continuous = continuous
+)
 
 dim_state = sim.observation_space.shape[0]
 
@@ -28,9 +34,12 @@ min_eps_before_update = 1000
 # instantiate BlackboxGradientSensing with the Actor (with right number of actions), and then forward your environment for the actor to learn from it
 # you can also supply your own Actor, which simply receives a state tensor and outputs action logits
 
+num_actions = sim.action_space.n if not continuous else sim.action_space.shape[0]
+
 actor = Actor(
     dim_state = dim_state,
-    num_actions = sim.action_space.n,
+    num_actions = num_actions,
+    continuous = continuous,
     dim_latent = dim_gene,
     accepts_latent = use_genetic_algorithm,
     sample = True,

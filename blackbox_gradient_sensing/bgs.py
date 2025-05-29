@@ -59,6 +59,14 @@ def join(arr, delimiter):
 def is_empty(t):
     return t.numel() == 0
 
+def item(t):
+    if t.numel() == 0:
+        out = t.item()
+    else:
+        out = t.tolist()
+
+    return out
+
 def arange_like(t, *, dim = None, length = None):
     assert exists(dim) or exists(length)
 
@@ -160,11 +168,13 @@ class Actor(Module):
         dim_state,
         *,
         num_actions,
+        continuous = False,
         hidden_dim = 32,
         accepts_latent = False,
         dim_latent = None,
         sample = False,
-        weight_norm_linears = True
+        weight_norm_linears = True,
+        eps = 1e-5
     ):
         super().__init__()
         maybe_weight_norm = weight_norm if weight_norm_linears else identity
@@ -180,8 +190,10 @@ class Actor(Module):
 
         self.final_norm = nn.RMSNorm(hidden_dim)
 
-        self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
+        self.to_logits = nn.Linear(hidden_dim, num_actions * (2 if continuous else 1), bias = False)
         self.to_logits = maybe_weight_norm(self.to_logits, name = 'weight', dim = None)
+
+        self.continuous = continuous
 
         self.norm_weights_()
 
@@ -245,7 +257,12 @@ class Actor(Module):
 
         # actor can return sampled action(s) for the simulation / environment
 
-        actions = gumbel_sample(action_logits, temp = sample_temperature)
+        if not self.continuous:
+            actions = gumbel_sample(action_logits, temp = sample_temperature)
+        else:
+            mean, log_var = rearrange(action_logits, '... (d mu_var) -> mu_var ... d', mu_var = 2)
+            std = log_var.exp().sqrt()
+            actions = torch.normal(mean, std * sample_temperature).tanh() # todo - accept action range and do scale and shift
 
         return actions, hiddens
 
@@ -978,7 +995,7 @@ class BlackboxGradientSensing(Module):
                                 action = gumbel_sample(action_or_logits)
                                 action = action.item()
                             else:
-                                action = action_or_logits.item()
+                                action = item(action_or_logits)
 
                             env_out = env.step(action)
 
