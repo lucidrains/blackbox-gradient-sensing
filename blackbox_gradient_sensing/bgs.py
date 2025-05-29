@@ -273,8 +273,8 @@ class Actor(Module):
             action_logits = raw_actions
             actions = gumbel_sample(action_logits, temp = sample_temperature)
         else:
-            mean, log_var = raw_actions
-            std = log_var.exp().sqrt()
+            mean, raw_std = raw_actions
+            std = raw_std.sigmoid() * 3.
             actions = torch.normal(mean, std * sample_temperature).tanh() # todo - accept action range and do scale and shift
 
         return actions, hiddens
