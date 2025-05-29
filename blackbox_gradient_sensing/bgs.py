@@ -12,7 +12,7 @@ from typing import Callable
 import numpy as np
 
 import torch
-from torch import cat, nn, tensor, Tensor
+from torch import cat, stack, nn, tensor, Tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList, Parameter
 from torch.optim import Adam
@@ -190,8 +190,15 @@ class Actor(Module):
 
         self.final_norm = nn.RMSNorm(hidden_dim)
 
-        self.to_logits = nn.Linear(hidden_dim, num_actions * (2 if continuous else 1), bias = False)
-        self.to_logits = maybe_weight_norm(self.to_logits, name = 'weight', dim = None)
+        if continuous:
+            self.to_mean = nn.Linear(hidden_dim, num_actions, bias = False)
+            self.to_log_var = nn.Linear(hidden_dim, num_actions, bias = False)
+
+            self.to_mean = maybe_weight_norm(self.to_mean, name = 'weight', dim = None)
+            self.to_log_var = maybe_weight_norm(self.to_log_var, name = 'weight', dim = None)
+        else:
+            self.to_logits = nn.Linear(hidden_dim, num_actions, bias = False)
+            self.to_logits = maybe_weight_norm(self.to_logits, name = 'weight', dim = None)
 
         self.continuous = continuous
 
@@ -250,17 +257,23 @@ class Actor(Module):
         hiddens = F.silu(x)
 
         embed = self.final_norm(hiddens)
-        action_logits = self.to_logits(embed)
+
+        if not self.continuous:
+            raw_actions = self.to_logits(embed)
+        else:
+            mean, log_var = self.to_mean(embed), self.to_log_var(embed)
+            raw_actions = stack((mean, log_var))
 
         if not self.sample:
-            return action_logits, hiddens
+            return raw_actions, hiddens
 
         # actor can return sampled action(s) for the simulation / environment
 
         if not self.continuous:
+            action_logits = raw_actions
             actions = gumbel_sample(action_logits, temp = sample_temperature)
         else:
-            mean, log_var = rearrange(action_logits, '... (d mu_var) -> mu_var ... d', mu_var = 2)
+            mean, log_var = raw_actions
             std = log_var.exp().sqrt()
             actions = torch.normal(mean, std * sample_temperature).tanh() # todo - accept action range and do scale and shift
 
@@ -993,7 +1006,7 @@ class BlackboxGradientSensing(Module):
 
                             if self.sample_actions_from_actor:
                                 action = gumbel_sample(action_or_logits)
-                                action = action.item()
+                                action = item(action)
                             else:
                                 action = item(action_or_logits)
 
