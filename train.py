@@ -5,7 +5,7 @@ from blackbox_gradient_sensing import BlackboxGradientSensing, Actor
 
 import gymnasium as gym
 
-continuous = False
+continuous = True
 
 sim = gym.make(
     'LunarLander-v3',
