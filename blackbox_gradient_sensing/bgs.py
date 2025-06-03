@@ -276,6 +276,7 @@ class Actor(Module):
             mean, raw_std = raw_actions
             std = raw_std.sigmoid() * 3.
             actions = torch.normal(mean, std * sample_temperature).tanh() # todo - accept action range and do scale and shift
+            actions = actions.tanh()
 
         return actions, hiddens
 
