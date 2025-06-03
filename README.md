@@ -6,6 +6,8 @@ Note: This paper is from 2022, and PPO is now being used for sim2real for humano
 
 Will also incorporate the latent population variant used in [EPO](https://github.com/lucidrains/evolutionary-policy-optimization). Of all the things going on in evolutionary field, I believe crossover may be one of the most important. This may be the ultimate [bitter lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html).
 
+Update: I see what the author is talking about now. Continuous lander, incredibly difficult to train in PPO for some reason, starts working for evolutionary strategies within 20 updates..
+
 ## Install
 
 ```bash
