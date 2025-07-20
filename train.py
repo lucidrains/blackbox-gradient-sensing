@@ -27,6 +27,9 @@ num_genes = 3
 num_selected = 2
 tournament_size = 2
 
+use_cpu = True
+torch_compile_actor = False
+
 # recording
 
 min_eps_before_update = 1000
@@ -55,7 +58,7 @@ bgs = BlackboxGradientSensing(
     use_ema = True,
     optim_klass = AdoptAtan2,
     optim_step_post_hook = lambda: actor.norm_weights_(),
-    torch_compile_actor = True,
+    torch_compile_actor = torch_compile_actor,
     mutate_latent_genes = True,
     crossover_after_step = 100,
     crossover_every_step = 50,
@@ -63,6 +66,7 @@ bgs = BlackboxGradientSensing(
     sample_actions_from_actor = False,
     factorized_noise = True,
     orthogonalized_noise = True,
+    cpu = use_cpu,
     optim_kwargs = dict(
         cautious_factor = 0.1,
     ),
