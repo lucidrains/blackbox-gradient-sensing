@@ -57,5 +57,13 @@ pythonpath = [
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "blackbox_gradient_sensing",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["blackbox_gradient_sensing"]
